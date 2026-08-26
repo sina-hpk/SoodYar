@@ -15,6 +15,7 @@
     "test": "npm run test --workspace server",
     "db:setup": "npm run db:setup --workspace server",
     "db:seed": "npm run db:seed --workspace server",
+    "db:reset": "npm run db:reset --workspace server",
     "start": "npm run start --workspace server"
   },
   "devDependencies": {

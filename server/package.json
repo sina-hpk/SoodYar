@@ -13,7 +13,8 @@
     "prisma:generate": "prisma generate",
     "db:setup": "prisma db push --skip-generate && prisma generate",
     "db:migrate": "prisma migrate dev",
-    "db:seed": "tsx prisma/seed.ts"
+    "db:seed": "tsx prisma/seed.ts",
+    "db:reset": "tsx prisma/reset.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
