@@ -8,12 +8,14 @@ import {
   buySchema,
   sellSchema,
   cashOpSchema,
+  contributionSchema,
 } from "../schemas.js";
 import {
   createDeposit,
   createWithdrawalRequest,
   settleWithdrawal,
   cancelWithdrawalRequest,
+  createInKindContribution,
 } from "../services/memberTx.js";
 import { buyAsset, sellAsset, cashOperation } from "../services/assetTx.js";
 
@@ -68,8 +70,20 @@ export async function transactionRoutes(app: FastifyInstance) {
     }
   });
 
-  app.post("/transactions/withdrawal-request", async (req, reply) => {
-    const parsed = withdrawalRequestSchema.safeParse(req.body);
+  // In-kind contribution: member brings a non-cash asset (deposit + buy + price).
+  app.post("/transactions/contribution", async (req, reply) => {
+    const parsed = contributionSchema.safeParse(req.body);
+    if (!parsed.success)
+      return reply.code(400).send({ error: parsed.error.flatten() });
+    try {
+      const result = await createInKindContribution(parsed.data);
+      return serialize(result);
+    } catch (e) {
+      return reply.code(400).send({ error: (e as Error).message });
+    }
+  });
+
+  app.post("/transactions/withdrawal-request", async (req, reply) => {    const parsed = withdrawalRequestSchema.safeParse(req.body);
     if (!parsed.success)
       return reply.code(400).send({ error: parsed.error.flatten() });
     try {

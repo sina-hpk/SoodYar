@@ -116,6 +116,27 @@ export const priceSchema = z.object({
   note: z.string().optional(),
 });
 
+// In-kind contribution: a member brings a non-cash asset (e.g. 50 EUR, gold, a
+// coin). It is modelled as a deposit valued at the asset's day value, followed
+// immediately by a BUY of that asset with the same cash — so net cash is zero
+// and the portfolio really holds the asset. The caller either targets an
+// existing asset (assetId) or provides fields to create a new one (symbol/name).
+export const contributionSchema = z
+  .object({
+    memberId: z.string().min(1),
+    assetId: z.string().optional(),
+    symbol: z.string().min(1).optional(),
+    name: z.string().min(1).optional(),
+    assetClass: assetClassEnum.optional(),
+    quantity: decimalStringSchema,
+    pricePerUnitRial: rialSchema,
+    effectiveDate: isoDateSchema,
+    description: z.string().optional(),
+  })
+  .refine((d) => d.assetId != null || (d.symbol != null && d.name != null), {
+    message: "دارایی موجود یا نماد و نام دارایی جدید لازم است",
+  });
+
 export const navCommitSchema = z.object({
   navDate: isoDateSchema,
   liabilitiesRial: rialSchema.optional(),

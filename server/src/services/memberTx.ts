@@ -1,6 +1,12 @@
 import Decimal from "decimal.js";
 import { prisma } from "../db.js";
-import { issueUnits, redeemUnits, decToString } from "../lib/money.js";
+import {
+  issueUnits,
+  redeemUnits,
+  decToString,
+  toDecimal,
+  assetMarketValue,
+} from "../lib/money.js";
 import { getPortfolioState, computeMemberUnits } from "./portfolio.js";
 import { audit } from "./audit.js";
 
@@ -69,6 +75,165 @@ export async function createDeposit(input: DepositInput) {
     navPerUnit: decToString(navPerUnit),
   });
   return { ...result, units: decToString(units), navPerUnit: decToString(navPerUnit) };
+}
+
+export interface ContributionInput {
+  memberId: string;
+  // Target an existing asset…
+  assetId?: string;
+  // …or create a new one.
+  symbol?: string;
+  name?: string;
+  assetClass?: string;
+  quantity: string;
+  pricePerUnitRial: bigint;
+  effectiveDate: Date;
+  description?: string;
+}
+
+/**
+ * In-kind contribution: a member brings a non-cash asset instead of cash.
+ * It is recorded as a deposit valued at the asset's day value (quantity ×
+ * pricePerUnit), which issues units for the member and adds that cash to the
+ * portfolio; then a BUY of the asset spends exactly that cash, so net cash is
+ * zero and the portfolio really holds the asset. A same-day price snapshot is
+ * also recorded so the holding shows a real day value immediately (not "valued
+ * at cost"). All steps run in one DB transaction so state stays consistent.
+ */
+export async function createInKindContribution(input: ContributionInput) {
+  const qty = toDecimal(input.quantity);
+  if (qty.lte(0)) throw new Error("مقدار دارایی نامعتبر است");
+
+  const contributionValue = assetMarketValue(qty, input.pricePerUnitRial);
+  if (contributionValue <= 0n) throw new Error("ارزش آورده باید بزرگ‌تر از صفر باشد");
+
+  const state = await getPortfolioState();
+  const navPerUnit = state.navPerUnit;
+  const units = issueUnits(contributionValue, navPerUnit);
+
+  const result = await prisma.$transaction(async (tx) => {
+    // Resolve or create the target asset.
+    let asset = input.assetId
+      ? await tx.asset.findUnique({ where: { id: input.assetId } })
+      : null;
+    if (input.assetId && !asset) throw new Error("دارایی یافت نشد");
+    if (!asset) {
+      asset = await tx.asset.create({
+        data: {
+          symbol: input.symbol!,
+          name: input.name!,
+          assetClass: input.assetClass ?? "OTHER",
+        },
+      });
+    }
+
+    // 1) Deposit valued at the day value → issues units + adds cash.
+    const deposit = await tx.memberTransaction.create({
+      data: {
+        memberId: input.memberId,
+        type: "DEPOSIT",
+        status: "CONFIRMED",
+        amountRial: contributionValue,
+        units: "0",
+        navPerUnit: decToString(navPerUnit),
+        effectiveDate: input.effectiveDate,
+        description: input.description ?? "آوردهٔ غیرنقدی",
+      },
+    });
+    await tx.memberTransaction.create({
+      data: {
+        memberId: input.memberId,
+        type: "UNIT_ISSUANCE",
+        status: "CONFIRMED",
+        amountRial: contributionValue,
+        units: decToString(units),
+        navPerUnit: decToString(navPerUnit),
+        effectiveDate: input.effectiveDate,
+        relatedTxId: deposit.id,
+        description: input.description ?? "آوردهٔ غیرنقدی",
+      },
+    });
+    await tx.portfolioTransaction.create({
+      data: {
+        type: "CASH_ADJUSTMENT",
+        status: "CONFIRMED",
+        cashDeltaRial: contributionValue,
+        effectiveDate: input.effectiveDate,
+        description: `آوردهٔ غیرنقدی عضو (${input.memberId})`,
+      },
+    });
+
+    // 2) BUY the asset with exactly that cash → net cash effect is zero.
+    const oldQty = toDecimal(asset.quantity);
+    const oldBasis = oldQty.mul(toDecimal(asset.avgCost));
+    const addedBasis = toDecimal(contributionValue.toString());
+    const newQty = oldQty.add(qty);
+    const newAvg = newQty.lte(0)
+      ? new Decimal(0)
+      : oldBasis.add(addedBasis).div(newQty);
+    await tx.portfolioTransaction.create({
+      data: {
+        type: "BUY",
+        status: "CONFIRMED",
+        assetId: asset.id,
+        quantity: input.quantity,
+        pricePerUnit: input.pricePerUnitRial.toString(),
+        feeRial: 0n,
+        realizedPnlRial: 0n,
+        cashDeltaRial: -contributionValue,
+        effectiveDate: input.effectiveDate,
+        description: input.description ?? "آوردهٔ غیرنقدی",
+      },
+    });
+    await tx.asset.update({
+      where: { id: asset.id },
+      data: {
+        quantity: decToString(newQty),
+        avgCost: newAvg.toFixed(0, Decimal.ROUND_HALF_UP),
+      },
+    });
+
+    // 3) Record a same-day price so the holding has a real day value now.
+    await tx.priceSnapshot.upsert({
+      where: {
+        assetId_priceDate: {
+          assetId: asset.id,
+          priceDate: input.effectiveDate,
+        },
+      },
+      create: {
+        assetId: asset.id,
+        priceRial: input.pricePerUnitRial.toString(),
+        priceDate: input.effectiveDate,
+        source: "MANUAL",
+        note: "قیمت آورده",
+      },
+      update: {
+        priceRial: input.pricePerUnitRial.toString(),
+        source: "MANUAL",
+        note: "قیمت آورده",
+      },
+    });
+
+    return { deposit, asset };
+  });
+
+  await audit("CONTRIBUTION_IN_KIND", "MemberTransaction", result.deposit.id, {
+    memberId: input.memberId,
+    assetId: result.asset.id,
+    quantity: input.quantity,
+    pricePerUnitRial: input.pricePerUnitRial,
+    contributionValueRial: contributionValue,
+    units: decToString(units),
+    navPerUnit: decToString(navPerUnit),
+  });
+  return {
+    deposit: result.deposit,
+    assetId: result.asset.id,
+    contributionValueRial: contributionValue.toString(),
+    units: decToString(units),
+    navPerUnit: decToString(navPerUnit),
+  };
 }
 
 export interface WithdrawalRequestInput {

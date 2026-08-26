@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ArrowDownCircle, ArrowUpCircle } from "lucide-react";
+import { ArrowDownCircle, ArrowUpCircle, PackagePlus } from "lucide-react";
 import { api, type Member, type MemberTx } from "../lib/api";
 import { Card, PageHeader, Badge, Empty, RiskNotice } from "../components/ui";
 import { Modal, ConfirmDialog } from "../components/Modal";
@@ -7,7 +7,7 @@ import { JalaliDateInput } from "../components/JalaliDateInput";
 import { useToast } from "../components/Toast";
 import { useSettings } from "../context/SettingsContext";
 import { formatMoney, formatUnits, toJalali, todayIso } from "../lib/format";
-import { txTypeLabel, txStatusLabel, txStatusTone } from "../lib/labels";
+import { txTypeLabel, txStatusLabel, txStatusTone, ASSET_CLASSES } from "../lib/labels";
 
 const TYPE_OPTIONS = [
   "",
@@ -24,13 +24,28 @@ export default function Transactions() {
   const { currency } = useSettings();
   const toast = useToast();
   const [members, setMembers] = useState<Member[]>([]);
+  const [assets, setAssets] = useState<{ assetId: string; symbol: string; name: string }[]>([]);
   const [txs, setTxs] = useState<MemberTx[]>([]);
   const [filters, setFilters] = useState({ memberId: "", type: "", status: "", search: "" });
 
   const [depositOpen, setDepositOpen] = useState(false);
   const [withdrawOpen, setWithdrawOpen] = useState(false);
+  const [contribOpen, setContribOpen] = useState(false);
   const [deposit, setDeposit] = useState({ memberId: "", amountRial: "", effectiveDate: todayIso(), description: "" });
   const [withdraw, setWithdraw] = useState({ memberId: "", mode: "amount", amountRial: "", units: "", effectiveDate: todayIso(), description: "" });
+  const [contrib, setContrib] = useState({
+    memberId: "",
+    assetMode: "existing",
+    assetId: "",
+    symbol: "",
+    name: "",
+    assetClass: "FX",
+    quantity: "",
+    pricePerUnitRial: "",
+    effectiveDate: todayIso(),
+    description: "",
+  });
+  const [contribSaving, setContribSaving] = useState(false);
 
   const [settleTarget, setSettleTarget] = useState<MemberTx | null>(null);
   const [cancelTarget, setCancelTarget] = useState<MemberTx | null>(null);
@@ -38,6 +53,14 @@ export default function Transactions() {
   async function loadMembers() {
     try {
       setMembers(await api.members());
+    } catch (e) {
+      toast((e as Error).message, "error");
+    }
+  }
+  async function loadAssets() {
+    try {
+      const rows = await api.assets();
+      setAssets(rows.map((a) => ({ assetId: a.assetId, symbol: a.symbol, name: a.name })));
     } catch (e) {
       toast((e as Error).message, "error");
     }
@@ -56,6 +79,7 @@ export default function Transactions() {
   }
   useEffect(() => {
     loadMembers();
+    loadAssets();
   }, []);
   useEffect(() => {
     loadTxs();
@@ -79,6 +103,67 @@ export default function Transactions() {
       loadTxs();
     } catch (e) {
       toast((e as Error).message, "error");
+    }
+  }
+
+  async function submitContribution() {
+    if (!contrib.memberId) {
+      toast("عضو الزامی است", "error");
+      return;
+    }
+    if (contrib.assetMode === "existing" && !contrib.assetId) {
+      toast("دارایی موجود را انتخاب کنید", "error");
+      return;
+    }
+    if (contrib.assetMode === "new" && (!contrib.symbol.trim() || !contrib.name.trim())) {
+      toast("نماد و نام دارایی جدید الزامی است", "error");
+      return;
+    }
+    if (!contrib.quantity || Number(contrib.quantity) <= 0) {
+      toast("مقدار معتبر وارد کنید", "error");
+      return;
+    }
+    if (!contrib.pricePerUnitRial || Number(contrib.pricePerUnitRial) <= 0) {
+      toast("ارزش روز هر واحد را وارد کنید", "error");
+      return;
+    }
+    const body: Record<string, unknown> = {
+      memberId: contrib.memberId,
+      quantity: contrib.quantity,
+      pricePerUnitRial: Number(contrib.pricePerUnitRial),
+      effectiveDate: contrib.effectiveDate,
+      description: contrib.description,
+    };
+    if (contrib.assetMode === "existing") {
+      body.assetId = contrib.assetId;
+    } else {
+      body.symbol = contrib.symbol.trim();
+      body.name = contrib.name.trim();
+      body.assetClass = contrib.assetClass;
+    }
+    setContribSaving(true);
+    try {
+      await api.contribution(body);
+      toast("آوردهٔ غیرنقدی ثبت شد؛ واحد صادر و دارایی به سبد اضافه شد", "success");
+      setContribOpen(false);
+      setContrib({
+        memberId: "",
+        assetMode: "existing",
+        assetId: "",
+        symbol: "",
+        name: "",
+        assetClass: "FX",
+        quantity: "",
+        pricePerUnitRial: "",
+        effectiveDate: todayIso(),
+        description: "",
+      });
+      loadAssets();
+      loadTxs();
+    } catch (e) {
+      toast((e as Error).message, "error");
+    } finally {
+      setContribSaving(false);
     }
   }
 
@@ -140,6 +225,9 @@ export default function Transactions() {
           <div className="flex gap-2">
             <button className="btn-primary" onClick={() => setDepositOpen(true)}>
               <ArrowDownCircle size={18} /> واریز
+            </button>
+            <button className="btn-secondary" onClick={() => setContribOpen(true)}>
+              <PackagePlus size={18} /> افزودن دارایی
             </button>
             <button className="btn-secondary" onClick={() => setWithdrawOpen(true)}>
               <ArrowUpCircle size={18} /> درخواست برداشت
@@ -320,6 +408,151 @@ export default function Transactions() {
           </div>
           <p className="text-xs text-slate-500">
             واحد بر اساس NAV لحظه ثبت صادر می‌شود: واحد = مبلغ ÷ NAV هر واحد.
+          </p>
+        </div>
+      </Modal>
+
+      {/* In-kind contribution modal */}
+      <Modal
+        open={contribOpen}
+        onClose={() => setContribOpen(false)}
+        title="افزودن دارایی (آوردهٔ غیرنقدی)"
+        footer={
+          <>
+            <button className="btn-primary" onClick={submitContribution} disabled={contribSaving}>
+              {contribSaving ? "در حال ثبت…" : "ثبت آورده"}
+            </button>
+            <button className="btn-secondary" onClick={() => setContribOpen(false)}>
+              انصراف
+            </button>
+          </>
+        }
+      >
+        <div className="grid grid-cols-1 gap-4">
+          <div>
+            <label className="label">عضو *</label>
+            <select
+              className="input"
+              value={contrib.memberId}
+              onChange={(e) => setContrib({ ...contrib, memberId: e.target.value })}
+            >
+              <option value="">انتخاب کنید…</option>
+              {members.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.fullName}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="label">دارایی</label>
+            <select
+              className="input"
+              value={contrib.assetMode}
+              onChange={(e) => setContrib({ ...contrib, assetMode: e.target.value })}
+            >
+              <option value="existing">انتخاب از دارایی‌های موجود</option>
+              <option value="new">ساخت دارایی جدید</option>
+            </select>
+          </div>
+          {contrib.assetMode === "existing" ? (
+            <div>
+              <label className="label">دارایی موجود *</label>
+              <select
+                className="input"
+                value={contrib.assetId}
+                onChange={(e) => setContrib({ ...contrib, assetId: e.target.value })}
+              >
+                <option value="">انتخاب کنید…</option>
+                {assets.map((a) => (
+                  <option key={a.assetId} value={a.assetId}>
+                    {a.symbol} — {a.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div>
+                <label className="label">نماد *</label>
+                <input
+                  className="input"
+                  placeholder="مثلاً EUR"
+                  value={contrib.symbol}
+                  onChange={(e) => setContrib({ ...contrib, symbol: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="label">نام *</label>
+                <input
+                  className="input"
+                  placeholder="مثلاً یورو"
+                  value={contrib.name}
+                  onChange={(e) => setContrib({ ...contrib, name: e.target.value })}
+                />
+              </div>
+              <div className="sm:col-span-2">
+                <label className="label">دسته دارایی</label>
+                <select
+                  className="input"
+                  value={contrib.assetClass}
+                  onChange={(e) => setContrib({ ...contrib, assetClass: e.target.value })}
+                >
+                  {ASSET_CLASSES.map((c) => (
+                    <option key={c.value} value={c.value}>
+                      {c.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          )}
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div>
+              <label className="label">مقدار *</label>
+              <input
+                className="input tabular"
+                placeholder="مثلاً ۵۰"
+                value={contrib.quantity}
+                onChange={(e) => setContrib({ ...contrib, quantity: e.target.value })}
+              />
+            </div>
+            <div>
+              <label className="label">ارزش روز هر واحد (ریال) *</label>
+              <input
+                className="input tabular"
+                placeholder="مثلاً ۹۰۰۰۰۰"
+                value={contrib.pricePerUnitRial}
+                onChange={(e) => setContrib({ ...contrib, pricePerUnitRial: e.target.value })}
+              />
+            </div>
+          </div>
+          <div>
+            <label className="label">تاریخ (شمسی)</label>
+            <JalaliDateInput
+              value={contrib.effectiveDate}
+              onChange={(iso) => setContrib({ ...contrib, effectiveDate: iso })}
+            />
+          </div>
+          <div>
+            <label className="label">توضیح</label>
+            <input
+              className="input"
+              value={contrib.description}
+              onChange={(e) => setContrib({ ...contrib, description: e.target.value })}
+            />
+          </div>
+          {contrib.quantity && contrib.pricePerUnitRial && (
+            <div className="rounded-lg bg-slate-50 px-3 py-2 text-sm tabular text-slate-700">
+              ارزش آورده = {formatMoney(
+                String(Math.round(Number(contrib.quantity) * Number(contrib.pricePerUnitRial))),
+                currency
+              )}
+            </div>
+          )}
+          <p className="text-xs text-slate-500">
+            این آورده معادل «واریز به ارزش روز دارایی + خرید همان دارایی» ثبت می‌شود؛ پس نقد سبد تغییر خالص ندارد،
+            دارایی وارد سبد می‌شود و برای عضو به همان ارزش واحد صادر می‌گردد. قیمت روزِ همان تاریخ هم ثبت می‌شود.
           </p>
         </div>
       </Modal>

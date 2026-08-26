@@ -235,6 +235,11 @@ export const api = {
     ),
   deposit: (body: Record<string, unknown>) =>
     request("/transactions/deposit", { method: "POST", body: JSON.stringify(body) }),
+  contribution: (body: Record<string, unknown>) =>
+    request("/transactions/contribution", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
   withdrawalRequest: (body: Record<string, unknown>) =>
     request("/transactions/withdrawal-request", {
       method: "POST",
