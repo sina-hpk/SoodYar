@@ -1,23 +1,22 @@
 @echo off
-chcp 65001 >nul
-title SoodYar - پاک‌سازی داده‌ها
+title SoodYar - Reset Data
 cd /d "%~dp0"
 
 echo ============================================
-echo    پاک‌سازی کامل داده‌های سودیار
+echo    SoodYar - Full data reset
 echo ============================================
 echo.
-echo هشدار: تمام اعضا، تراکنش‌ها، دارایی‌ها و تاریخچه پاک می‌شوند.
-echo تنظیمات به حالت پیش‌فرض برمی‌گردند.
+echo WARNING: all members, transactions, assets and history will be deleted.
+echo Settings will be restored to defaults.
 echo.
-set /p confirm="برای ادامه Y و سپس Enter بزنید: "
+set /p confirm="Type Y then Enter to continue: "
 if /i not "%confirm%"=="Y" (
-  echo لغو شد.
+  echo Cancelled.
   pause
   goto :eof
 )
 
 call npm run db:reset
 echo.
-echo انجام شد. حالا می‌توانید start.bat را اجرا کنید.
+echo Done. You can now run start.bat
 pause
