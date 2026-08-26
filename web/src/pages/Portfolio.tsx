@@ -172,11 +172,28 @@ export default function Portfolio() {
                     <td className="td tabular">{formatUnits(a.quantity, 8)}</td>
                     <td className="td tabular">{formatMoney(a.avgCostRial, currency)}</td>
                     <td className="td tabular">
-                      {a.latestPriceRial ? formatMoney(a.latestPriceRial, currency) : "—"}
+                      {a.latestPriceRial ? (
+                        formatMoney(a.latestPriceRial, currency)
+                      ) : (
+                        <span className="text-amber-600" title="هنوز قیمت روز ثبت نشده؛ به بهای خرید ارزش‌گذاری شده است.">
+                          ثبت‌نشده
+                        </span>
+                      )}
                     </td>
-                    <td className="td tabular">{formatMoney(a.marketValueRial, currency)}</td>
+                    <td className="td tabular">
+                      {formatMoney(a.marketValueRial, currency)}
+                      {a.valuedAtCost && (
+                        <div className="text-[10px] text-amber-600">به بهای خرید</div>
+                      )}
+                    </td>
                     <td className="td">
-                      <PnlCell amount={a.unrealizedPnlRial} percent={a.unrealizedReturnPercent} currency={currency} />
+                      {a.valuedAtCost ? (
+                        <span className="text-xs text-slate-400" title="تا زمانی که قیمت روز ثبت نشود، سود/زیان تحقق‌نیافته صفر در نظر گرفته می‌شود.">
+                          —
+                        </span>
+                      ) : (
+                        <PnlCell amount={a.unrealizedPnlRial} percent={a.unrealizedReturnPercent} currency={currency} />
+                      )}
                     </td>
                     <td className="td tabular">{formatMoney(a.realizedPnlRial, currency)}</td>
                     <td className="td">

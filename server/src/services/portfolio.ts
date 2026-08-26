@@ -33,6 +33,7 @@ export interface AssetValuation {
   remainingCostBasisRial: string;
   latestPriceRial: string | null;
   priceDate: string | null;
+  valuedAtCost: boolean;
   marketValueRial: string; // integer rial as string
   unrealizedPnlRial: string;
   unrealizedReturnPercent: string | null;
@@ -127,18 +128,27 @@ export async function getPortfolioState(): Promise<PortfolioState> {
     });
     const qty = toDecimal(a.quantity);
     const priceRial = latest ? BigInt(latest.priceRial) : 0n;
-    const marketValue =
-      latest && qty.gt(0) ? assetMarketValue(qty, priceRial) : 0n;
     const remainingBasis = assetMarketValue(qty, BigInt(a.avgCost));
-    const unrealized = unrealizedPnl(marketValue, remainingBasis.toString());
+    // Mark to market when a price exists; otherwise value the holding at its
+    // cost basis so a freshly bought asset with no recorded price is not shown
+    // as a total loss. `valuedAtCost` lets the UI flag that no live price is set.
+    const hasPrice = latest != null && qty.gt(0);
+    const valuedAtCost = !hasPrice && qty.gt(0);
+    const marketValue = hasPrice
+      ? assetMarketValue(qty, priceRial)
+      : valuedAtCost
+        ? remainingBasis
+        : 0n;
+    const unrealized = valuedAtCost
+      ? 0n
+      : unrealizedPnl(marketValue, remainingBasis.toString());
     const realized = BigInt(a.realizedPnl || "0");
     const totalPnl = realized + unrealized;
     assetsValueRial += marketValue;
 
-    const unrealizedRet = returnPercent(
-      unrealized.toString(),
-      remainingBasis.toString()
-    );
+    const unrealizedRet = valuedAtCost
+      ? null
+      : returnPercent(unrealized.toString(), remainingBasis.toString());
     // Total return relative to the cost basis still at work in the position.
     const totalRet = returnPercent(totalPnl.toString(), remainingBasis.toString());
 
@@ -153,6 +163,7 @@ export async function getPortfolioState(): Promise<PortfolioState> {
       remainingCostBasisRial: remainingBasis.toString(),
       latestPriceRial: latest ? latest.priceRial : null,
       priceDate: latest ? latest.priceDate.toISOString() : null,
+      valuedAtCost,
       marketValueRial: marketValue.toString(),
       unrealizedPnlRial: unrealized.toString(),
       unrealizedReturnPercent: unrealizedRet ? unrealizedRet.toString() : null,

@@ -46,8 +46,16 @@ export function assetClassLabel(cls: string): string {
     ETF: "صندوق قابل معامله (ETF)",
     MUTUAL_FUND: "صندوق سرمایه‌گذاری",
     GOLD: "طلا",
-    FIXED_INCOME: "درآمد ثابت",
+    COIN: "سکه",
+    SILVER: "نقره",
+    COMMODITY: "کالا (نفت، فلزات، کشاورزی)",
+    FIXED_INCOME: "درآمد ثابت / سپرده",
+    BOND: "اوراق قرضه/مشارکت",
     FX: "ارز",
+    REAL_ESTATE: "املاک و مستغلات",
+    VEHICLE: "خودرو",
+    PRIVATE_EQUITY: "سرمایه‌گذاری در کسب‌وکار خصوصی",
+    COLLECTIBLE: "کالای کلکسیونی (هنر، عتیقه)",
     CASH: "نقد",
     OTHER: "سایر",
     // legacy values from earlier data
@@ -57,15 +65,23 @@ export function assetClassLabel(cls: string): string {
   return map[cls] ?? cls;
 }
 
-/** Ordered list of selectable asset categories (excludes the CASH pseudo-bucket). */
+/** Ordered list of selectable asset categories (includes CASH for manual cash-like holdings). */
 export const ASSET_CLASSES: { value: string; label: string }[] = [
   "CRYPTO",
   "STOCK",
   "ETF",
   "MUTUAL_FUND",
   "GOLD",
+  "COIN",
+  "SILVER",
+  "COMMODITY",
   "FIXED_INCOME",
+  "BOND",
   "FX",
+  "REAL_ESTATE",
+  "VEHICLE",
+  "PRIVATE_EQUITY",
+  "COLLECTIBLE",
   "CASH",
   "OTHER",
 ].map((v) => ({ value: v, label: assetClassLabel(v) }));

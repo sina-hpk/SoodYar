@@ -76,6 +76,7 @@ export interface AssetValuation {
   remainingCostBasisRial: string;
   latestPriceRial: string | null;
   priceDate: string | null;
+  valuedAtCost: boolean;
   marketValueRial: string;
   unrealizedPnlRial: string;
   unrealizedReturnPercent: string | null;

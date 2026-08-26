@@ -24,7 +24,7 @@ import { formatMoney, formatUnits, formatPercent, toJalali, toPersianDigits } fr
 import { useSettings } from "../context/SettingsContext";
 import { txTypeLabel, txStatusTone, txStatusLabel, assetClassLabel } from "../lib/labels";
 
-const PIE_COLORS = ["#2f8659", "#4fa172", "#7fbf99", "#aed8bf", "#226b47", "#d6ecdf", "#94a3b8", "#f59e0b", "#3b82f6"];
+const PIE_COLORS = ["#2f8659", "#4fa172", "#7fbf99", "#aed8bf", "#226b47", "#d6ecdf", "#94a3b8", "#f59e0b", "#3b82f6", "#8b5cf6", "#ec4899", "#14b8a6", "#f97316", "#64748b", "#eab308", "#06b6d4", "#a855f7"];
 
 export default function Dashboard() {
   const { currency } = useSettings();
