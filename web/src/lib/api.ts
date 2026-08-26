@@ -207,6 +207,8 @@ export const api = {
     request<Member>("/members", { method: "POST", body: JSON.stringify(body) }),
   updateMember: (id: string, body: Record<string, unknown>) =>
     request<Member>(`/members/${id}`, { method: "PUT", body: JSON.stringify(body) }),
+  deleteMember: (id: string) =>
+    request<{ ok: true }>(`/members/${id}`, { method: "DELETE" }),
 
   // Assets & prices
   assets: () => request<AssetValuation[]>("/assets"),

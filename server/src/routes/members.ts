@@ -67,4 +67,28 @@ export async function memberRoutes(app: FastifyInstance) {
     await audit("MEMBER_UPDATE", "Member", id, parsed.data);
     return serialize(member);
   });
+
+  // Hard-delete a member. Blocked when the member has any ledger transactions,
+  // because NAV/units are reconstructed from that ledger and removing the member
+  // would corrupt historical calculations. In that case the caller should set the
+  // member's status to INACTIVE instead.
+  app.delete("/members/:id", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const member = await prisma.member.findUnique({ where: { id } });
+    if (!member) return reply.code(404).send({ error: "عضو یافت نشد" });
+
+    const txCount = await prisma.memberTransaction.count({
+      where: { memberId: id },
+    });
+    if (txCount > 0) {
+      return reply.code(409).send({
+        error:
+          "این عضو تراکنش ثبت‌شده دارد و برای حفظ صحت محاسبات NAV قابل حذف نیست. به‌جای حذف، وضعیت او را «غیرفعال» کنید.",
+      });
+    }
+
+    await prisma.member.delete({ where: { id } });
+    await audit("MEMBER_DELETE", "Member", id, { fullName: member.fullName });
+    return serialize({ ok: true });
+  });
 }
