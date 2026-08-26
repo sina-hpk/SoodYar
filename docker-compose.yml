@@ -1,0 +1,40 @@
+# SoodYar - optional Docker Compose for local development.
+# Runs the API (Fastify + SQLite) and the web (Vite dev server).
+# Usage: docker compose up --build
+
+services:
+  server:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    container_name: soodyar-server
+    environment:
+      - PORT=4000
+      - HOST=0.0.0.0
+      - NODE_ENV=development
+      - CORS_ORIGIN=http://localhost:5300
+      - DATABASE_URL=file:./prisma/dev.db
+      - BACKUP_DIR=./backups
+      - DEFAULT_NAV_PER_UNIT=1000000
+    ports:
+      - "4000:4000"
+    volumes:
+      - soodyar-db:/app/prisma
+      - soodyar-backups:/app/backups
+    command: sh -c "npm run db:setup && npm run db:seed && npm run start"
+
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    container_name: soodyar-web
+    environment:
+      - VITE_API_BASE_URL=http://localhost:4000
+    ports:
+      - "5300:5300"
+    depends_on:
+      - server
+
+volumes:
+  soodyar-db:
+  soodyar-backups:

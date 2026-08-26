@@ -1,0 +1,179 @@
+// SoodYar Prisma schema (SQLite for v1).
+//
+// Migration to PostgreSQL:
+//   1. Change `provider = "postgresql"` below.
+//   2. Set DATABASE_URL to a postgres connection string.
+//   3. Run `prisma migrate dev`.
+// The schema deliberately avoids SQLite-only features so the migration is clean.
+//
+// MONEY CONVENTIONS (see financial rules #9):
+//   - Rial amounts are stored as BigInt (integer rial). No floats.
+//   - Units and NAV-per-unit are stored as String holding a Decimal with
+//     8 fractional digits. SQLite has no native Decimal; we serialize the
+//     decimal.js value as a fixed-precision string and compute with decimal.js.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Member {
+  id           String   @id @default(cuid())
+  fullName     String
+  nationalId   String?
+  phone        String?
+  email        String?
+  joinDate     DateTime // ISO date
+  status       String   @default("ACTIVE") // ACTIVE | INACTIVE
+  notes        String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  transactions MemberTransaction[]
+
+  @@index([status])
+}
+
+model Asset {
+  id           String   @id @default(cuid())
+  symbol       String   @unique
+  name         String
+  // CRYPTO | STOCK | ETF | MUTUAL_FUND | GOLD | FIXED_INCOME | FX | CASH | OTHER
+  assetClass   String   @default("OTHER")
+  // Held quantity as Decimal(8) string. Derived from BUY/SELL transactions.
+  quantity     String   @default("0")
+  // Weighted average buy cost per unit, in rial (integer) stored as string of BigInt.
+  avgCost      String   @default("0")
+  // Cumulative realized P&L (rial, BigInt as string) preserved even after a
+  // position is fully closed, so Closed Positions keep their history.
+  realizedPnl  String   @default("0")
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  prices       PriceSnapshot[]
+  portfolioTxs PortfolioTransaction[]
+
+  @@index([isActive])
+  @@index([assetClass])
+}
+
+// Investor-facing capital movements and unit ledger entries.
+model MemberTransaction {
+  id            String   @id @default(cuid())
+  memberId      String
+  member        Member   @relation(fields: [memberId], references: [id])
+  // DEPOSIT | WITHDRAWAL_REQUEST | WITHDRAWAL_SETTLEMENT | UNIT_ISSUANCE | UNIT_REDEMPTION | ADJUSTMENT
+  type          String
+  // PENDING | CONFIRMED | CANCELLED | SETTLED
+  status        String   @default("CONFIRMED")
+  // Rial amount as BigInt (integer). Positive numbers; direction implied by type.
+  amountRial    BigInt   @default(0)
+  // Units (Decimal(8) string). Positive; direction implied by type.
+  units         String   @default("0")
+  // NAV per unit at the time of the transaction (Decimal(8) string, in rial).
+  navPerUnit    String?
+  // ISO date the transaction is effective on.
+  effectiveDate DateTime
+  // For settlements linked to an earlier request, and for reversals.
+  relatedTxId   String?
+  reversedById  String?
+  description   String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([memberId])
+  @@index([type])
+  @@index([status])
+  @@index([effectiveDate])
+}
+
+// Portfolio-level movements: buying/selling assets, fees, dividends, cash tweaks.
+model PortfolioTransaction {
+  id            String   @id @default(cuid())
+  // BUY | SELL | FEE | DIVIDEND | CASH_ADJUSTMENT
+  type          String
+  status        String   @default("CONFIRMED") // CONFIRMED | CANCELLED
+  assetId       String?
+  asset         Asset?   @relation(fields: [assetId], references: [id])
+  // Quantity of the asset for BUY/SELL (Decimal(8) string).
+  quantity      String   @default("0")
+  // Price per unit of asset in rial (BigInt) stored as string.
+  pricePerUnit  String   @default("0")
+  // Trade fee in rial (BigInt as string). BUY: added to cost basis; SELL: reduces proceeds.
+  feeRial       BigInt   @default(0)
+  // Realized P&L attributed to a SELL (rial, BigInt). Zero for other types.
+  realizedPnlRial BigInt @default(0)
+  // Signed cash effect on the portfolio cash balance, in rial (BigInt).
+  // BUY: negative, SELL: positive, FEE: negative, DIVIDEND: positive, CASH_ADJUSTMENT: signed.
+  cashDeltaRial BigInt   @default(0)
+  effectiveDate DateTime
+  reversedById  String?
+  description   String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([type])
+  @@index([assetId])
+  @@index([effectiveDate])
+}
+
+// Manually recorded daily price for an asset (in rial, BigInt as string).
+model PriceSnapshot {
+  id         String   @id @default(cuid())
+  assetId    String
+  asset      Asset    @relation(fields: [assetId], references: [id])
+  priceRial  String // BigInt as string
+  priceDate  DateTime // ISO date
+  source     String   @default("MANUAL") // MANUAL | API
+  sourceRef  String? // optional API reference / note
+  note       String?
+  createdAt  DateTime @default(now())
+
+  @@unique([assetId, priceDate])
+  @@index([priceDate])
+}
+
+// Point-in-time NAV computation, reconstructable and dated.
+model NavSnapshot {
+  id                String   @id @default(cuid())
+  navDate           DateTime // ISO date
+  cashBalanceRial   BigInt // integer rial
+  assetsValueRial   BigInt // integer rial
+  liabilitiesRial   BigInt   @default(0)
+  totalNavRial      BigInt // cash + assets - liabilities
+  totalActiveUnits  String // Decimal(8) string
+  navPerUnit        String // Decimal(8) string (rial)
+  // JSON breakdown of per-asset valuation for auditability.
+  breakdown         String?
+  note              String?
+  createdAt         DateTime @default(now())
+
+  @@unique([navDate])
+  @@index([navDate])
+}
+
+model AppSetting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  action     String // e.g. MEMBER_CREATE, DEPOSIT_CONFIRM, NAV_SNAPSHOT
+  entityType String
+  entityId   String?
+  // JSON snapshot of relevant data for full reconstruction.
+  data       String?
+  actor      String   @default("system")
+  createdAt  DateTime @default(now())
+
+  @@index([action])
+  @@index([entityType])
+  @@index([createdAt])
+}
