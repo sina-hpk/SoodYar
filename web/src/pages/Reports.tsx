@@ -1,10 +1,24 @@
 import { useEffect, useState } from "react";
 import { Download, FileSpreadsheet } from "lucide-react";
+import {
+  AreaChart,
+  Area,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  Tooltip,
+  CartesianGrid,
+  ResponsiveContainer,
+  Cell,
+} from "recharts";
 import { api, exportUrl, type NavSnapshot } from "../lib/api";
 import { Card, PageHeader, StatCard, RiskNotice, Empty, Badge } from "../components/ui";
 import { useSettings } from "../context/SettingsContext";
-import { formatMoney, formatUnits, formatPercent, toJalali } from "../lib/format";
+import { formatMoney, formatUnits, formatPercent, toJalali, toPersianDigits } from "../lib/format";
 import { assetClassLabel } from "../lib/labels";
+
+const CAT_COLORS = ["#2f8659", "#3b82f6", "#f59e0b", "#8b5cf6", "#ec4899", "#14b8a6", "#f97316", "#64748b", "#eab308", "#06b6d4", "#a855f7", "#4fa172", "#94a3b8", "#226b47", "#7fbf99", "#d6ecdf", "#aed8bf"];
 
 export default function Reports() {
   const { currency } = useSettings();
@@ -19,6 +33,23 @@ export default function Reports() {
 
   if (error) return <Card className="text-red-600">{error}</Card>;
   if (!report) return <div className="text-slate-400">در حال بارگذاری…</div>;
+
+  const compact = (v: number) =>
+    toPersianDigits(new Intl.NumberFormat("en-US", { notation: "compact" }).format(v));
+
+  const navChartData = nav.map((s) => ({
+    date: toJalali(s.navDate, "MM/dd"),
+    total: Number(s.totalNavRial),
+    assets: Number(s.assetsValueRial),
+    cash: Number(s.cashBalanceRial),
+  }));
+
+  const categoryBarData = (report.categories ?? [])
+    .filter((c: any) => Number(c.marketValueRial) > 0)
+    .map((c: any) => ({
+      name: assetClassLabel(c.category),
+      value: Number(c.marketValueRial),
+    }));
 
   return (
     <div className="space-y-6">
@@ -53,6 +84,67 @@ export default function Reports() {
         <StatCard label="ارزش دارایی‌ها" value={formatMoney(report.assetsValueRial, currency)} />
         <StatCard label="واحدهای فعال" value={formatUnits(report.totalActiveUnits)} />
       </div>
+
+      <Card>
+        <h3 className="mb-4 font-semibold text-slate-700">روند ارزش کل صندوق</h3>
+        {navChartData.length === 0 ? (
+          <div className="py-12 text-center text-sm text-slate-400">
+            برای رسم این نمودار، در صفحهٔ «محاسبه NAV» چند عکس‌فوری NAV ثبت کنید.
+          </div>
+        ) : (
+          <ResponsiveContainer width="100%" height={300}>
+            <AreaChart data={navChartData} margin={{ left: 10, right: 10 }}>
+              <defs>
+                <linearGradient id="repTotal" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#2f8659" stopOpacity={0.35} />
+                  <stop offset="100%" stopColor="#2f8659" stopOpacity={0.02} />
+                </linearGradient>
+                <linearGradient id="repAssets" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#3b82f6" stopOpacity={0.2} />
+                  <stop offset="100%" stopColor="#3b82f6" stopOpacity={0.02} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="#eef2f7" />
+              <XAxis dataKey="date" tick={{ fontSize: 12 }} reversed />
+              <YAxis tick={{ fontSize: 11 }} width={80} tickFormatter={compact} />
+              <Tooltip
+                formatter={(v: number, name) => [formatMoney(String(Math.round(v)), currency), name as string]}
+                labelFormatter={(l) => `تاریخ: ${l}`}
+              />
+              <Area type="monotone" dataKey="total" name="ارزش کل" stroke="#2f8659" strokeWidth={2} fill="url(#repTotal)" />
+              <Area type="monotone" dataKey="assets" name="دارایی‌ها" stroke="#3b82f6" strokeWidth={1.5} fill="url(#repAssets)" />
+              <Area type="monotone" dataKey="cash" name="نقد" stroke="#f59e0b" strokeWidth={1.5} fillOpacity={0} />
+            </AreaChart>
+          </ResponsiveContainer>
+        )}
+      </Card>
+
+      <Card>
+        <h3 className="mb-4 font-semibold text-slate-700">ارزش هر دستهٔ دارایی</h3>
+        {categoryBarData.length === 0 ? (
+          <Empty>دسته‌ای با ارزش روز برای نمایش وجود ندارد.</Empty>
+        ) : (
+          <ResponsiveContainer width="100%" height={Math.max(220, categoryBarData.length * 46)}>
+            <BarChart data={categoryBarData} layout="vertical" margin={{ left: 20, right: 20 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#eef2f7" horizontal={false} />
+              <XAxis type="number" tick={{ fontSize: 11 }} tickFormatter={compact} />
+              <YAxis
+                type="category"
+                dataKey="name"
+                tick={{ fontSize: 12 }}
+                width={110}
+                orientation="right"
+              />
+              <Tooltip formatter={(v: number) => formatMoney(String(Math.round(v)), currency)} />
+              <Bar dataKey="value" name="ارزش روز" radius={[0, 6, 6, 0]}>
+                {categoryBarData.map((_: any, i: number) => (
+                  <Cell key={i} fill={CAT_COLORS[i % CAT_COLORS.length]} />
+                ))}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        )}
+      </Card>
 
       <Card>
         <h3 className="mb-4 font-semibold text-slate-700">تخصیص دارایی بر اساس دسته</h3>

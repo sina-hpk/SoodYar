@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { Plus, TrendingUp, TrendingDown, Tag } from "lucide-react";
-import { api, type AssetValuation } from "../lib/api";
+import { Plus, TrendingUp, TrendingDown, Tag, Radio } from "lucide-react";
+import { api, type AssetValuation, type MarketQuote } from "../lib/api";
 import { Card, PageHeader, Badge, Empty, RiskNotice } from "../components/ui";
 import { Modal } from "../components/Modal";
 import { ConfirmDialog } from "../components/Modal";
@@ -9,6 +9,27 @@ import { useToast } from "../components/Toast";
 import { useSettings } from "../context/SettingsContext";
 import { formatMoney, formatUnits, formatPercent, todayIso } from "../lib/format";
 import { assetClassLabel, ASSET_CLASSES } from "../lib/labels";
+
+/** Normalizes a symbol/name for fuzzy matching against a market quote. */
+function norm(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/[\u200c\s\-_]/g, "")
+    .replace(/[۰-۹]/g, (d) => "0123456789"["۰۱۲۳۴۵۶۷۸۹".indexOf(d)]);
+}
+
+/** Best-effort match of an asset to a live market quote by symbol/name. */
+function matchQuote(asset: AssetValuation, quotes: MarketQuote[]): MarketQuote | null {
+  const sym = norm(asset.symbol);
+  const nm = norm(asset.name);
+  for (const q of quotes) {
+    const qsym = norm(q.symbol);
+    const qname = norm(q.name);
+    if (sym && (sym === qsym || sym.includes(qsym) || qsym.includes(sym))) return q;
+    if (nm && (nm === qname || nm.includes(qname) || qname.includes(nm))) return q;
+  }
+  return null;
+}
 
 /** Small colored P&L cell that shows amount + return percent. */
 function PnlCell({
@@ -38,6 +59,9 @@ export default function Portfolio() {
   const [newOpen, setNewOpen] = useState(false);
   const [tradeOpen, setTradeOpen] = useState<null | { mode: "BUY" | "SELL"; asset: AssetValuation }>(null);
   const [confirmTrade, setConfirmTrade] = useState(false);
+  const [quotes, setQuotes] = useState<MarketQuote[]>([]);
+  const [priceOpen, setPriceOpen] = useState<null | { asset: AssetValuation; quote: MarketQuote }>(null);
+  const [applyingPrice, setApplyingPrice] = useState(false);
 
   const [newAsset, setNewAsset] = useState({ symbol: "", name: "", assetClass: "STOCK" });
   const [trade, setTrade] = useState({
@@ -56,7 +80,36 @@ export default function Portfolio() {
   }
   useEffect(() => {
     load();
+    // Live quotes are best-effort; failure just hides the "live price" action.
+    api.marketQuotes().then((m) => setQuotes(m.quotes)).catch(() => {});
   }, []);
+
+  async function applyLivePrice() {
+    if (!priceOpen) return;
+    const { asset, quote } = priceOpen;
+    if (!quote.priceRial) {
+      toast("قیمت ریالی برای این مورد در دسترس نیست", "error");
+      return;
+    }
+    setApplyingPrice(true);
+    try {
+      await api.recordPrice({
+        assetId: asset.assetId,
+        priceRial: Number(quote.priceRial),
+        priceDate: todayIso(),
+        source: "API",
+        sourceRef: `${quote.source}:${quote.key}`,
+        note: `قیمت زندهٔ ${quote.name} (${quote.unit})`,
+      });
+      toast(`قیمت روز ${asset.symbol} از بازار ثبت شد`, "success");
+      setPriceOpen(null);
+      load();
+    } catch (e) {
+      toast((e as Error).message, "error");
+    } finally {
+      setApplyingPrice(false);
+    }
+  }
 
   const active = useMemo(
     () => assets.filter((a) => !a.isClosed && (!filter || a.assetClass === filter)),
@@ -202,6 +255,19 @@ export default function Portfolio() {
                     <td className="td tabular">{formatPercent(a.weightPercent)}</td>
                     <td className="td">
                       <div className="flex gap-1">
+                        {(() => {
+                          const q = matchQuote(a, quotes);
+                          if (!q || !q.priceRial) return null;
+                          return (
+                            <button
+                              className="rounded-md bg-blue-50 p-1.5 text-blue-600 hover:bg-blue-100"
+                              title={`ثبت قیمت زنده از بازار (${q.name})`}
+                              onClick={() => setPriceOpen({ asset: a, quote: q })}
+                            >
+                              <Radio size={16} />
+                            </button>
+                          );
+                        })()}
                         <button
                           className="rounded-md bg-green-50 p-1.5 text-green-600 hover:bg-green-100"
                           title="خرید"
@@ -398,6 +464,49 @@ export default function Portfolio() {
         onConfirm={submitTrade}
         onCancel={() => setConfirmTrade(false)}
       />
+
+      {/* Live market price modal */}
+      <Modal
+        open={!!priceOpen}
+        onClose={() => setPriceOpen(null)}
+        title={`ثبت قیمت زنده — ${priceOpen?.asset.symbol ?? ""}`}
+        footer={
+          <>
+            <button className="btn-primary" onClick={applyLivePrice} disabled={applyingPrice}>
+              {applyingPrice ? "در حال ثبت…" : "ثبت به‌عنوان قیمت امروز"}
+            </button>
+            <button className="btn-secondary" onClick={() => setPriceOpen(null)}>
+              انصراف
+            </button>
+          </>
+        }
+      >
+        {priceOpen && (
+          <div className="space-y-3 text-sm">
+            <div className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2">
+              <span className="text-slate-500">مورد بازار متناظر</span>
+              <span className="font-medium text-slate-700">
+                {priceOpen.quote.name} <span className="text-xs text-slate-400">({priceOpen.quote.unit})</span>
+              </span>
+            </div>
+            <div className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2">
+              <span className="text-slate-500">قیمت زنده</span>
+              <span className="tabular font-semibold text-brand-700">
+                {priceOpen.quote.priceRial ? formatMoney(priceOpen.quote.priceRial, currency) : "—"}
+              </span>
+            </div>
+            <div className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2">
+              <span className="text-slate-500">منبع</span>
+              <span className="text-slate-600">{priceOpen.quote.source}</span>
+            </div>
+            <p className="leading-6 text-slate-500">
+              این قیمت به‌عنوان «قیمت روز» دارایی برای تاریخ امروز ثبت می‌شود (منبع: API) و
+              در محاسبهٔ ارزش روز و سود/زیان به‌کار می‌رود. اگر قیمت واحد دارایی شما با واحد
+              بازار متفاوت است (مثلاً هر گرم در برابر هر مثقال)، پیش از ثبت از تطابق واحدها مطمئن شوید.
+            </p>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }

@@ -131,6 +131,27 @@ export interface PortfolioTx {
   asset?: { symbol: string } | null;
 }
 
+export interface MarketQuote {
+  key: string;
+  symbol: string;
+  name: string;
+  category: "FX" | "GOLD" | "COIN" | "SILVER" | "CRYPTO";
+  unit: string;
+  priceRial: string | null;
+  priceUsd: string | null;
+  changePercent: number | null;
+  source: string;
+  asOf: string | null;
+}
+
+export interface MarketSnapshot {
+  quotes: MarketQuote[];
+  usdRial: string | null;
+  fetchedAt: string;
+  partial: boolean;
+  errors: string[];
+}
+
 export interface NavSnapshot {
   id: string;
   navDate: string;
@@ -261,6 +282,10 @@ export const api = {
   portfolioReport: () => request<any>("/reports/portfolio"),
   memberReport: (id: string) => request<any>(`/reports/member/${id}`),
   auditReport: () => request<AuditReport>("/reports/audit"),
+
+  // Live market data
+  marketQuotes: (force = false) =>
+    request<MarketSnapshot>(`/market/quotes${force ? "?force=1" : ""}`),
 
   // Settings & backup
   settings: () => request<Record<string, string>>("/settings"),

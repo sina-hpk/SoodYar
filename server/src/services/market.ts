@@ -1,0 +1,213 @@
+/**
+ * Live market data. Fetches spot prices from public, keyless sources and
+ * normalizes them into rial-denominated quotes grouped by asset class so the
+ * UI can show interpretable market charts and let the user snapshot a live
+ * price onto a matching asset.
+ *
+ * Sources (all free / no API key):
+ *   - TGJU (call1.tgju.org/ajax.json): Iranian market aggregator. Returns rial
+ *     prices for fiat (USD/EUR/…), domestic gold (gram, mithqal) and coins, and
+ *     USD prices for global instruments (gold ounce, silver ounce, crypto).
+ *   - CoinGecko (api.coingecko.com): crypto USD fallback if TGJU is unreachable.
+ *
+ * Everything here is read-only and never writes to the DB. Results are cached
+ * in memory for a short TTL so we don't hammer upstream on every page load.
+ */
+
+export type MarketCategory =
+  | "FX"
+  | "GOLD"
+  | "COIN"
+  | "SILVER"
+  | "CRYPTO";
+
+export interface MarketQuote {
+  key: string; // stable identifier, e.g. "usd", "btc", "gram18"
+  symbol: string; // short display symbol
+  name: string; // Persian label
+  category: MarketCategory;
+  unit: string; // Persian unit, e.g. "هر دلار", "هر گرم"
+  priceRial: string | null; // integer rial as string (null if not derivable)
+  priceUsd: string | null; // original USD price when the source is USD
+  changePercent: number | null; // 24h/day change percent when available
+  source: string; // "TGJU" | "CoinGecko"
+  asOf: string | null; // upstream timestamp when available
+}
+
+export interface MarketSnapshot {
+  quotes: MarketQuote[];
+  usdRial: string | null; // USD→rial rate used for conversions
+  fetchedAt: string; // ISO time we assembled the snapshot
+  partial: boolean; // true if some sources failed
+  errors: string[];
+}
+
+const CACHE_TTL_MS = 60_000;
+const FETCH_TIMEOUT_MS = 12_000;
+
+let cache: { at: number; data: MarketSnapshot } | null = null;
+
+/** Curated TGJU instruments → normalized quote metadata. */
+interface TgjuMap {
+  tgjuKey: string;
+  key: string;
+  symbol: string;
+  name: string;
+  category: MarketCategory;
+  unit: string;
+  /** Currency the TGJU `p` value is expressed in. */
+  denom: "IRR" | "USD";
+}
+
+const TGJU_INSTRUMENTS: TgjuMap[] = [
+  // Fiat (rial)
+  { tgjuKey: "price_dollar_rl", key: "usd", symbol: "USD", name: "دلار آمریکا", category: "FX", unit: "هر دلار", denom: "IRR" },
+  { tgjuKey: "price_eur", key: "eur", symbol: "EUR", name: "یورو", category: "FX", unit: "هر یورو", denom: "IRR" },
+  { tgjuKey: "price_gbp", key: "gbp", symbol: "GBP", name: "پوند انگلیس", category: "FX", unit: "هر پوند", denom: "IRR" },
+  { tgjuKey: "price_aed", key: "aed", symbol: "AED", name: "درهم امارات", category: "FX", unit: "هر درهم", denom: "IRR" },
+  { tgjuKey: "price_try", key: "try", symbol: "TRY", name: "لیر ترکیه", category: "FX", unit: "هر لیر", denom: "IRR" },
+  // Domestic gold (rial)
+  { tgjuKey: "geram18", key: "gram18", symbol: "طلا ۱۸", name: "طلای ۱۸ عیار", category: "GOLD", unit: "هر گرم", denom: "IRR" },
+  { tgjuKey: "geram24", key: "gram24", symbol: "طلا ۲۴", name: "طلای ۲۴ عیار", category: "GOLD", unit: "هر گرم", denom: "IRR" },
+  { tgjuKey: "mesghal", key: "mesghal", symbol: "مثقال", name: "مثقال طلا", category: "GOLD", unit: "هر مثقال", denom: "IRR" },
+  // Global gold ounce (USD)
+  { tgjuKey: "ons", key: "xau", symbol: "XAU", name: "انس جهانی طلا", category: "GOLD", unit: "هر انس", denom: "USD" },
+  // Coins (rial)
+  { tgjuKey: "sekee", key: "coin_emami", symbol: "سکه امامی", name: "سکه تمام (امامی)", category: "COIN", unit: "هر سکه", denom: "IRR" },
+  { tgjuKey: "sekeb", key: "coin_bahar", symbol: "بهار آزادی", name: "سکه بهار آزادی", category: "COIN", unit: "هر سکه", denom: "IRR" },
+  { tgjuKey: "nim", key: "coin_half", symbol: "نیم‌سکه", name: "نیم‌سکه", category: "COIN", unit: "هر سکه", denom: "IRR" },
+  { tgjuKey: "rob", key: "coin_quarter", symbol: "ربع‌سکه", name: "ربع‌سکه", category: "COIN", unit: "هر سکه", denom: "IRR" },
+  // Silver ounce (USD)
+  { tgjuKey: "silver", key: "xag", symbol: "XAG", name: "انس جهانی نقره", category: "SILVER", unit: "هر انس", denom: "USD" },
+  // Crypto (USD)
+  { tgjuKey: "crypto-bitcoin", key: "btc", symbol: "BTC", name: "بیت‌کوین", category: "CRYPTO", unit: "هر واحد", denom: "USD" },
+  { tgjuKey: "crypto-ethereum", key: "eth", symbol: "ETH", name: "اتریوم", category: "CRYPTO", unit: "هر واحد", denom: "USD" },
+  { tgjuKey: "crypto-tether", key: "usdt", symbol: "USDT", name: "تتر", category: "CRYPTO", unit: "هر واحد", denom: "USD" },
+];
+
+async function fetchJson(url: string): Promise<any> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
+  try {
+    const res = await fetch(url, {
+      signal: ctrl.signal,
+      headers: { "User-Agent": "SoodYar/1.0 (+local)" },
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.json();
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Parse a TGJU numeric string like "2,005,000" or "77934.15" to a number. */
+function parseNum(p: unknown): number | null {
+  if (p == null) return null;
+  const n = Number(String(p).replace(/,/g, "").trim());
+  return Number.isFinite(n) ? n : null;
+}
+
+function roundRial(n: number): string {
+  return Math.round(n).toString();
+}
+
+export async function getMarketSnapshot(force = false): Promise<MarketSnapshot> {
+  if (!force && cache && Date.now() - cache.at < CACHE_TTL_MS) {
+    return cache.data;
+  }
+
+  const errors: string[] = [];
+  const quotes: MarketQuote[] = [];
+  let usdRial: number | null = null;
+
+  // ---- Primary source: TGJU ----
+  let tgju: any = null;
+  try {
+    tgju = await fetchJson("https://call1.tgju.org/ajax.json");
+  } catch (e) {
+    errors.push(`TGJU: ${(e as Error).message}`);
+  }
+
+  const cur = tgju?.current ?? null;
+  if (cur) {
+    const usd = parseNum(cur["price_dollar_rl"]?.p);
+    if (usd && usd > 0) usdRial = usd;
+
+    for (const inst of TGJU_INSTRUMENTS) {
+      const raw = cur[inst.tgjuKey];
+      if (!raw) continue;
+      const value = parseNum(raw.p);
+      if (value == null) continue;
+
+      let priceRial: string | null = null;
+      let priceUsd: string | null = null;
+      if (inst.denom === "IRR") {
+        priceRial = roundRial(value);
+      } else {
+        priceUsd = value.toString();
+        if (usdRial) priceRial = roundRial(value * usdRial);
+      }
+
+      const change = typeof raw.dp === "number" ? raw.dp : parseNum(raw.dp);
+
+      quotes.push({
+        key: inst.key,
+        symbol: inst.symbol,
+        name: inst.name,
+        category: inst.category,
+        unit: inst.unit,
+        priceRial,
+        priceUsd,
+        changePercent: change ?? null,
+        source: "TGJU",
+        asOf: raw.ts ?? raw.t_en ?? null,
+      });
+    }
+  }
+
+  // ---- Fallback: CoinGecko for crypto if TGJU gave us nothing crypto ----
+  const haveCrypto = quotes.some((q) => q.category === "CRYPTO");
+  if (!haveCrypto) {
+    try {
+      const cg = await fetchJson(
+        "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum,tether&vs_currencies=usd&include_24hr_change=true"
+      );
+      const map: { id: string; key: string; symbol: string; name: string }[] = [
+        { id: "bitcoin", key: "btc", symbol: "BTC", name: "بیت‌کوین" },
+        { id: "ethereum", key: "eth", symbol: "ETH", name: "اتریوم" },
+        { id: "tether", key: "usdt", symbol: "USDT", name: "تتر" },
+      ];
+      for (const m of map) {
+        const usdPrice = cg?.[m.id]?.usd;
+        if (usdPrice == null) continue;
+        quotes.push({
+          key: m.key,
+          symbol: m.symbol,
+          name: m.name,
+          category: "CRYPTO",
+          unit: "هر واحد",
+          priceRial: usdRial ? roundRial(usdPrice * usdRial) : null,
+          priceUsd: String(usdPrice),
+          changePercent: cg?.[m.id]?.usd_24h_change ?? null,
+          source: "CoinGecko",
+          asOf: null,
+        });
+      }
+    } catch (e) {
+      errors.push(`CoinGecko: ${(e as Error).message}`);
+    }
+  }
+
+  const snapshot: MarketSnapshot = {
+    quotes,
+    usdRial: usdRial != null ? roundRial(usdRial) : null,
+    fetchedAt: new Date().toISOString(),
+    partial: errors.length > 0,
+    errors,
+  };
+
+  // Only cache a snapshot that actually carries data; otherwise let the next
+  // call retry upstream immediately.
+  if (quotes.length > 0) cache = { at: Date.now(), data: snapshot };
+  return snapshot;
+}

@@ -8,6 +8,7 @@ import { transactionRoutes } from "./routes/transactions.js";
 import { navRoutes } from "./routes/nav.js";
 import { reportRoutes } from "./routes/reports.js";
 import { settingsRoutes } from "./routes/settings.js";
+import { marketRoutes } from "./routes/market.js";
 
 export async function buildServer() {
   const app = Fastify({
@@ -27,6 +28,7 @@ export async function buildServer() {
       await navRoutes(api);
       await reportRoutes(api);
       await settingsRoutes(api);
+      await marketRoutes(api);
     },
     { prefix: "/api" }
   );
