@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { RefreshCw } from "lucide-react";
 import { api, type AuditReport } from "../lib/api";
 import { Card, PageHeader, Empty, InfoNote, Badge } from "../components/ui";
+import { Formula } from "../components/Formula";
 import { useSettings } from "../context/SettingsContext";
 import { formatMoney, formatUnits, formatPercent, toJalali } from "../lib/format";
 import { assetClassLabel } from "../lib/labels";
@@ -44,18 +45,33 @@ export default function Audit() {
 
       <Card>
         <h3 className="mb-4 font-semibold text-slate-700">محاسبه NAV</h3>
-        <div className="space-y-1 rounded-lg bg-slate-50 p-4 text-sm tabular text-slate-700">
-          <div>موجودی نقد: {formatMoney(nav.cashBalanceRial, currency)}</div>
-          <div>+ ارزش روز دارایی‌ها: {formatMoney(nav.assetsValueRial, currency)}</div>
-          <div>− بدهی‌ها: {formatMoney(nav.liabilitiesRial, currency)}</div>
-          <div className="border-t border-slate-200 pt-1 font-semibold text-slate-800">
-            = NAV کل: {formatMoney(nav.totalNavRial, currency)}
-          </div>
-          <div className="pt-1">
-            ÷ واحدهای فعال: {formatUnits(nav.totalActiveUnits)} = NAV هر واحد:{" "}
-            {formatMoney(nav.navPerUnit, currency)}
-          </div>
-        </div>
+        <Formula
+          spec={{
+            result: "NAV کل",
+            terms: [
+              { label: formatMoney(nav.cashBalanceRial, currency), hint: "موجودی نقد" },
+              {
+                op: "+",
+                label: formatMoney(nav.assetsValueRial, currency),
+                hint: "ارزش روز دارایی‌ها",
+              },
+              { op: "−", label: formatMoney(nav.liabilitiesRial, currency), hint: "بدهی‌ها" },
+            ],
+            exampleLabel: "نتیجه",
+            example: formatMoney(nav.totalNavRial, currency),
+          }}
+        />
+        <Formula
+          spec={{
+            result: "NAV هر واحد",
+            terms: [
+              { label: formatMoney(nav.totalNavRial, currency), hint: "NAV کل" },
+              { op: "÷", label: formatUnits(nav.totalActiveUnits), hint: "واحدهای فعال" },
+            ],
+            exampleLabel: "نتیجه",
+            example: formatMoney(nav.navPerUnit, currency),
+          }}
+        />
       </Card>
 
       <Card>

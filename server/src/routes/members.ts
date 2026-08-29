@@ -11,15 +11,25 @@ import {
 } from "../services/portfolio.js";
 
 export async function memberRoutes(app: FastifyInstance) {
-  // List members with derived summary values.
+  // List members with derived summary values. `transactionCount` lets the UI
+  // tell up front whether a member can be hard-deleted at all (see DELETE below),
+  // instead of only finding out after the user confirms.
   app.get("/members", async () => {
-    const [members, state] = await Promise.all([
+    const [members, state, txGroups] = await Promise.all([
       prisma.member.findMany({ orderBy: { createdAt: "asc" } }),
       getPortfolioState(),
+      prisma.memberTransaction.groupBy({
+        by: ["memberId"],
+        _count: { _all: true },
+      }),
     ]);
+    const txCountByMember = new Map(
+      txGroups.map((g) => [g.memberId, g._count._all])
+    );
     const rows = await Promise.all(
       members.map(async (m) => ({
         ...m,
+        transactionCount: txCountByMember.get(m.id) ?? 0,
         summary: await getMemberSummary(m.id, state),
       }))
     );
@@ -82,8 +92,7 @@ export async function memberRoutes(app: FastifyInstance) {
     });
     if (txCount > 0) {
       return reply.code(409).send({
-        error:
-          "این عضو تراکنش ثبت‌شده دارد و برای حفظ صحت محاسبات NAV قابل حذف نیست. به‌جای حذف، وضعیت او را «غیرفعال» کنید.",
+        error: `این عضو ${txCount} تراکنش ثبت‌شده دارد. موجودی نقد، NAV و واحدها از همین تراکنش‌ها بازسازی می‌شوند، پس حذف عضو محاسبات گذشته را خراب می‌کند. به‌جای حذف، وضعیت او را «غیرفعال» کنید.`,
       });
     }
 

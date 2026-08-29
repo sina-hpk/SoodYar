@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { UserPlus, Pencil, Trash2 } from "lucide-react";
 import { api, type Member } from "../lib/api";
 import { Card, PageHeader, Badge, Empty } from "../components/ui";
-import { Modal, ConfirmDialog } from "../components/Modal";
+import { Modal } from "../components/Modal";
 import { JalaliDateInput } from "../components/JalaliDateInput";
 import { useToast } from "../components/Toast";
 import { useSettings } from "../context/SettingsContext";
@@ -117,6 +117,28 @@ export default function Members() {
     }
   }
 
+  /**
+   * The fallback for a member who cannot be deleted: keep the ledger intact and
+   * mark them inactive, which is what the backend's 409 recommends.
+   */
+  async function deactivate() {
+    if (!toDelete) return;
+    setDeleting(true);
+    try {
+      await api.updateMember(toDelete.id, { status: "INACTIVE" });
+      toast(`${toDelete.fullName} غیرفعال شد`, "success");
+      setToDelete(null);
+      load();
+    } catch (e) {
+      toast((e as Error).message, "error");
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  // A member is only hard-deletable while they have no ledger transactions.
+  const blockedByLedger = (toDelete?.transactionCount ?? 0) > 0;
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -189,7 +211,11 @@ export default function Members() {
                           </button>
                           <button
                             className="rounded-md p-1.5 text-slate-500 hover:bg-red-50 hover:text-red-600"
-                            title="حذف"
+                            title={
+                              (m.transactionCount ?? 0) > 0
+                                ? `قابل حذف نیست: ${m.transactionCount} تراکنش ثبت‌شده دارد`
+                                : "حذف"
+                            }
                             onClick={() => setToDelete(m)}
                           >
                             <Trash2 size={16} />
@@ -285,27 +311,65 @@ export default function Members() {
         </div>
       </Modal>
 
-      <ConfirmDialog
+      <Modal
         open={toDelete != null}
-        title="حذف عضو"
-        danger
-        confirmLabel={deleting ? "در حال حذف…" : "حذف"}
-        onCancel={() => setToDelete(null)}
-        onConfirm={confirmDelete}
-        message={
-          <div className="space-y-2">
-            <p>
-              آیا از حذف «{toDelete?.fullName}» مطمئن هستید؟ این کار قابل بازگشت
-              نیست.
+        onClose={() => setToDelete(null)}
+        title={blockedByLedger ? "این عضو قابل حذف نیست" : "حذف عضو"}
+        footer={
+          blockedByLedger ? (
+            <>
+              {toDelete?.status === "ACTIVE" && (
+                <button className="btn-primary" onClick={deactivate} disabled={deleting}>
+                  {deleting ? "در حال ذخیره…" : "غیرفعال کن"}
+                </button>
+              )}
+              <button className="btn-secondary" onClick={() => setToDelete(null)}>
+                بستن
+              </button>
+            </>
+          ) : (
+            <>
+              <button className="btn-danger" onClick={confirmDelete} disabled={deleting}>
+                {deleting ? "در حال حذف…" : "حذف"}
+              </button>
+              <button className="btn-secondary" onClick={() => setToDelete(null)}>
+                انصراف
+              </button>
+            </>
+          )
+        }
+      >
+        {blockedByLedger ? (
+          <div className="space-y-3 text-sm text-slate-600">
+            <p className="leading-7">
+              «{toDelete?.fullName}» {toDelete?.transactionCount} تراکنش ثبت‌شده دارد
+              (واریز، صدور واحد، برداشت و مانند آن). موجودی نقد صندوق، NAV و تعداد واحدها
+              همه از روی همین تراکنش‌ها بازسازی می‌شوند؛ پس حذف این عضو یعنی خراب شدن
+              محاسبات همهٔ اعضا، نه فقط او.
+            </p>
+            <p className="leading-7">
+              راه درست، غیرفعال کردن اوست: تاریخچه و سوابق سالم می‌ماند، در گزارش‌ها و
+              محاسبات گذشته چیزی تغییر نمی‌کند و اسمش هم از فهرست‌های انتخاب عضو برای
+              تراکنش‌های جدید کنار می‌رود.
+            </p>
+            {toDelete?.status === "INACTIVE" && (
+              <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
+                این عضو همین حالا غیرفعال است.
+              </p>
+            )}
+          </div>
+        ) : (
+          <div className="space-y-2 text-sm text-slate-600">
+            <p className="leading-7">
+              آیا از حذف «{toDelete?.fullName}» مطمئن هستید؟ این کار قابل بازگشت نیست.
             </p>
             <p className="text-xs text-slate-500">
-              توجه: اگر این عضو تراکنش ثبت‌شده (واریز/برداشت) داشته باشد، برای حفظ
-              صحت محاسبات NAV حذف نمی‌شود؛ در آن حالت به‌جای حذف، وضعیت او را
-              «غیرفعال» کنید.
+              این عضو هیچ تراکنشی ندارد، پس حذف او روی محاسبات NAV و سایر اعضا اثری
+              نمی‌گذارد.
             </p>
           </div>
-        }
-      />
+        )}
+      </Modal>
     </div>
   );
 }

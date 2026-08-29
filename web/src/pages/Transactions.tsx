@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { ArrowDownCircle, ArrowUpCircle, PackagePlus } from "lucide-react";
 import { api, type Member, type MemberTx } from "../lib/api";
 import { Card, PageHeader, Badge, Empty, RiskNotice } from "../components/ui";
+import { Formula } from "../components/Formula";
 import { Modal, ConfirmDialog } from "../components/Modal";
 import { JalaliDateInput } from "../components/JalaliDateInput";
 import { useToast } from "../components/Toast";
@@ -306,6 +307,7 @@ export default function Transactions() {
                   <th className="th">عضو</th>
                   <th className="th">نوع</th>
                   <th className="th">مبلغ</th>
+                  <th className="th">توضیح</th>
                   <th className="th">واحد</th>
                   <th className="th">NAV</th>
                   <th className="th">تاریخ</th>
@@ -319,6 +321,14 @@ export default function Transactions() {
                     <td className="td">{t.member?.fullName ?? "-"}</td>
                     <td className="td">{txTypeLabel(t.type)}</td>
                     <td className="td tabular">{formatMoney(t.amountRial, currency)}</td>
+                    {/* Descriptions can be long; show the first words and keep the rest on hover. */}
+                    <td className="td" title={t.description ?? ""}>
+                      {t.description?.trim() ? (
+                        <span className="block max-w-[14rem] truncate">{t.description}</span>
+                      ) : (
+                        <span className="text-slate-300">—</span>
+                      )}
+                    </td>
                     <td className="td tabular">{formatUnits(t.units)}</td>
                     <td className="td tabular">{t.navPerUnit ? formatMoney(t.navPerUnit, currency) : "-"}</td>
                     <td className="td">{toJalali(t.effectiveDate)}</td>
@@ -406,9 +416,15 @@ export default function Transactions() {
               onChange={(e) => setDeposit({ ...deposit, description: e.target.value })}
             />
           </div>
-          <p className="text-xs text-slate-500">
-            واحد بر اساس NAV لحظه ثبت صادر می‌شود: واحد = مبلغ ÷ NAV هر واحد.
-          </p>
+          <Formula
+            spec={{
+              result: "واحد صادرشده",
+              terms: [
+                { label: "مبلغ واریز" },
+                { op: "÷", label: "NAV هر واحد", hint: "در لحظهٔ ثبت" },
+              ],
+            }}
+          />
         </div>
       </Modal>
 
@@ -543,12 +559,20 @@ export default function Transactions() {
             />
           </div>
           {contrib.quantity && contrib.pricePerUnitRial && (
-            <div className="rounded-lg bg-slate-50 px-3 py-2 text-sm tabular text-slate-700">
-              ارزش آورده = {formatMoney(
-                String(Math.round(Number(contrib.quantity) * Number(contrib.pricePerUnitRial))),
-                currency
-              )}
-            </div>
+            <Formula
+              spec={{
+                result: "ارزش آورده",
+                terms: [
+                  { label: contrib.quantity, hint: "مقدار" },
+                  { op: "×", label: contrib.pricePerUnitRial, hint: "ارزش روز هر واحد (ریال)" },
+                ],
+                exampleLabel: "نتیجه",
+                example: formatMoney(
+                  String(Math.round(Number(contrib.quantity) * Number(contrib.pricePerUnitRial))),
+                  currency
+                ),
+              }}
+            />
           )}
           <p className="text-xs text-slate-500">
             این آورده معادل «واریز به ارزش روز دارایی + خرید همان دارایی» ثبت می‌شود؛ پس نقد سبد تغییر خالص ندارد،

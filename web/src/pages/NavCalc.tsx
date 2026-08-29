@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { RefreshCw, Save } from "lucide-react";
 import { api, type NavPreview, type AssetValuation } from "../lib/api";
 import { Card, PageHeader, StatCard, RiskNotice, Empty } from "../components/ui";
+import { Formula } from "../components/Formula";
 import { ConfirmDialog } from "../components/Modal";
 import { JalaliDateInput } from "../components/JalaliDateInput";
 import { useToast } from "../components/Toast";
@@ -181,26 +182,51 @@ export default function NavCalc() {
 
           <Card>
             <h3 className="mb-3 font-semibold text-slate-700">فرمول محاسبه (شفاف)</h3>
-            <div className="space-y-1 rounded-lg bg-slate-50 p-4 text-sm text-slate-600 tabular">
-              <div>موجودی نقد: {formatMoney(preview.cashBalanceRial, currency)}</div>
-              <div>+ ارزش روز دارایی‌ها: {formatMoney(preview.assetsValueRial, currency)}</div>
-              <div>− بدهی‌ها: {formatMoney(liabilities || "0", currency)}</div>
-              <div className="border-t border-slate-200 pt-1 font-semibold text-slate-800">
-                = NAV کل:{" "}
-                {formatMoney(
+            <Formula
+              spec={{
+                result: "NAV کل",
+                terms: [
+                  {
+                    label: formatMoney(preview.cashBalanceRial, currency),
+                    hint: "موجودی نقد",
+                  },
+                  {
+                    op: "+",
+                    label: formatMoney(preview.assetsValueRial, currency),
+                    hint: "ارزش روز دارایی‌ها",
+                  },
+                  {
+                    op: "−",
+                    label: formatMoney(liabilities || "0", currency),
+                    hint: "بدهی‌ها",
+                  },
+                ],
+                exampleLabel: "نتیجه",
+                example: formatMoney(
                   String(
                     BigInt(preview.cashBalanceRial) +
                       BigInt(preview.assetsValueRial) -
                       BigInt(Math.round(Number(liabilities) || 0))
                   ),
                   currency
-                )}
-              </div>
-              <div className="pt-1">
-                ÷ واحدهای فعال: {formatUnits(preview.totalActiveUnits)} = NAV هر واحد:{" "}
-                {formatMoney(preview.navPerUnit, currency)}
-              </div>
-            </div>
+                ),
+              }}
+            />
+            <Formula
+              spec={{
+                result: "NAV هر واحد",
+                terms: [
+                  { label: formatMoney(preview.totalNavRial, currency), hint: "NAV کل" },
+                  {
+                    op: "÷",
+                    label: formatUnits(preview.totalActiveUnits),
+                    hint: "واحدهای فعال",
+                  },
+                ],
+                exampleLabel: "نتیجه",
+                example: formatMoney(preview.navPerUnit, currency),
+              }}
+            />
           </Card>
 
           <Card>

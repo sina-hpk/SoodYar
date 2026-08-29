@@ -37,6 +37,8 @@ export interface Member {
   joinDate: string;
   status: "ACTIVE" | "INACTIVE";
   notes?: string | null;
+  /** Ledger transactions of this member; any non-zero count blocks hard deletion. */
+  transactionCount?: number;
   summary?: MemberSummary;
 }
 
@@ -236,6 +238,10 @@ export const api = {
   assetsRaw: () => request<any[]>("/assets/raw"),
   createAsset: (body: Record<string, unknown>) =>
     request("/assets", { method: "POST", body: JSON.stringify(body) }),
+  updateAsset: (id: string, body: Record<string, unknown>) =>
+    request(`/assets/${id}`, { method: "PUT", body: JSON.stringify(body) }),
+  deleteAsset: (id: string) =>
+    request<{ ok: true }>(`/assets/${id}`, { method: "DELETE" }),
   recordPrice: (body: {
     assetId: string;
     priceRial: number;
@@ -277,6 +283,13 @@ export const api = {
     request("/transactions/buy", { method: "POST", body: JSON.stringify(body) }),
   sell: (body: Record<string, unknown>) =>
     request("/transactions/sell", { method: "POST", body: JSON.stringify(body) }),
+  cashOp: (body: {
+    type: "FEE" | "DIVIDEND" | "CASH_ADJUSTMENT";
+    amountRial: number;
+    assetId?: string;
+    effectiveDate: string;
+    description?: string;
+  }) => request("/transactions/cash-op", { method: "POST", body: JSON.stringify(body) }),
 
   // Reports
   portfolioReport: () => request<any>("/reports/portfolio"),
