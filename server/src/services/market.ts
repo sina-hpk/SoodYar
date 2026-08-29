@@ -17,6 +17,7 @@
 export type MarketCategory =
   | "FX"
   | "GOLD"
+  | "GOLD_TOKEN"
   | "COIN"
   | "SILVER"
   | "CRYPTO";
@@ -83,6 +84,13 @@ const TGJU_INSTRUMENTS: TgjuMap[] = [
   { tgjuKey: "crypto-bitcoin", key: "btc", symbol: "BTC", name: "بیت‌کوین", category: "CRYPTO", unit: "هر واحد", denom: "USD" },
   { tgjuKey: "crypto-ethereum", key: "eth", symbol: "ETH", name: "اتریوم", category: "CRYPTO", unit: "هر واحد", denom: "USD" },
   { tgjuKey: "crypto-tether", key: "usdt", symbol: "USDT", name: "تتر", category: "CRYPTO", unit: "هر واحد", denom: "USD" },
+  // Tether in the domestic market: TGJU quotes it directly in rial, which is the
+  // rate an Iranian buyer actually pays, not the 1$ peg times the fiat rate.
+  { tgjuKey: "crypto-tether-irr", key: "usdt_irr", symbol: "USDT/IRR", name: "تتر (بازار داخلی)", category: "CRYPTO", unit: "هر تتر", denom: "IRR" },
+  // Gold-backed tokens: one unit tracks one troy ounce of gold. Kept in their own
+  // category because they behave like gold but trade on crypto venues.
+  { tgjuKey: "tether_gold_xaut", key: "xaut", symbol: "XAUT", name: "تتر گلد", category: "GOLD_TOKEN", unit: "هر واحد ≈ یک انس طلا", denom: "USD" },
+  { tgjuKey: "crypto_paxg_gold", key: "paxg", symbol: "PAXG", name: "پکس گلد", category: "GOLD_TOKEN", unit: "هر واحد ≈ یک انس طلا", denom: "USD" },
 ];
 
 async function fetchJson(url: string): Promise<any> {
@@ -165,27 +173,38 @@ export async function getMarketSnapshot(force = false): Promise<MarketSnapshot> 
     }
   }
 
-  // ---- Fallback: CoinGecko for crypto if TGJU gave us nothing crypto ----
-  const haveCrypto = quotes.some((q) => q.category === "CRYPTO");
-  if (!haveCrypto) {
+  // ---- Fallback: CoinGecko for crypto / gold tokens TGJU didn't give us ----
+  const cgMap: {
+    id: string;
+    key: string;
+    symbol: string;
+    name: string;
+    category: MarketCategory;
+    unit: string;
+  }[] = [
+    { id: "bitcoin", key: "btc", symbol: "BTC", name: "بیت‌کوین", category: "CRYPTO", unit: "هر واحد" },
+    { id: "ethereum", key: "eth", symbol: "ETH", name: "اتریوم", category: "CRYPTO", unit: "هر واحد" },
+    { id: "tether", key: "usdt", symbol: "USDT", name: "تتر", category: "CRYPTO", unit: "هر واحد" },
+    { id: "tether-gold", key: "xaut", symbol: "XAUT", name: "تتر گلد", category: "GOLD_TOKEN", unit: "هر واحد ≈ یک انس طلا" },
+    { id: "pax-gold", key: "paxg", symbol: "PAXG", name: "پکس گلد", category: "GOLD_TOKEN", unit: "هر واحد ≈ یک انس طلا" },
+  ];
+  const missing = cgMap.filter((m) => !quotes.some((q) => q.key === m.key));
+  if (missing.length > 0) {
     try {
       const cg = await fetchJson(
-        "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum,tether&vs_currencies=usd&include_24hr_change=true"
+        `https://api.coingecko.com/api/v3/simple/price?ids=${missing
+          .map((m) => m.id)
+          .join(",")}&vs_currencies=usd&include_24hr_change=true`
       );
-      const map: { id: string; key: string; symbol: string; name: string }[] = [
-        { id: "bitcoin", key: "btc", symbol: "BTC", name: "بیت‌کوین" },
-        { id: "ethereum", key: "eth", symbol: "ETH", name: "اتریوم" },
-        { id: "tether", key: "usdt", symbol: "USDT", name: "تتر" },
-      ];
-      for (const m of map) {
+      for (const m of missing) {
         const usdPrice = cg?.[m.id]?.usd;
         if (usdPrice == null) continue;
         quotes.push({
           key: m.key,
           symbol: m.symbol,
           name: m.name,
-          category: "CRYPTO",
-          unit: "هر واحد",
+          category: m.category,
+          unit: m.unit,
           priceRial: usdRial ? roundRial(usdPrice * usdRial) : null,
           priceUsd: String(usdPrice),
           changePercent: cg?.[m.id]?.usd_24h_change ?? null,

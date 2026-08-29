@@ -14,6 +14,7 @@ import {
 } from "recharts";
 import { api, exportUrl, type NavSnapshot } from "../lib/api";
 import { Card, PageHeader, StatCard, RiskNotice, Empty, Badge } from "../components/ui";
+import { AllocationChart } from "../components/AllocationChart";
 import { useSettings } from "../context/SettingsContext";
 import { formatMoney, formatUnits, formatPercent, toJalali, toPersianDigits } from "../lib/format";
 import { assetClassLabel } from "../lib/labels";
@@ -119,6 +120,10 @@ export default function Reports() {
         )}
       </Card>
 
+      <Card className="p-6">
+        <AllocationChart categories={report.categories ?? []} currency={currency} />
+      </Card>
+
       <Card>
         <h3 className="mb-4 font-semibold text-slate-700">ارزش هر دستهٔ دارایی</h3>
         {categoryBarData.length === 0 ? (
@@ -147,7 +152,7 @@ export default function Reports() {
       </Card>
 
       <Card>
-        <h3 className="mb-4 font-semibold text-slate-700">تخصیص دارایی بر اساس دسته</h3>
+        <h3 className="mb-4 font-semibold text-slate-700">جدول تخصیص دسته‌ها</h3>
         {!report.categories || report.categories.length === 0 ? (
           <Empty>دسته‌ای برای نمایش وجود ندارد.</Empty>
         ) : (

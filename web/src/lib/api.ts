@@ -137,7 +137,7 @@ export interface MarketQuote {
   key: string;
   symbol: string;
   name: string;
-  category: "FX" | "GOLD" | "COIN" | "SILVER" | "CRYPTO";
+  category: "FX" | "GOLD" | "GOLD_TOKEN" | "COIN" | "SILVER" | "CRYPTO";
   unit: string;
   priceRial: string | null;
   priceUsd: string | null;

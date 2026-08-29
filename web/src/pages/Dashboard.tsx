@@ -16,29 +16,26 @@ import {
   YAxis,
   Tooltip,
   ResponsiveContainer,
-  PieChart,
-  Pie,
-  Cell,
   CartesianGrid,
   AreaChart,
   Area,
 } from "recharts";
 import { api, type Dashboard as DashboardData, type NavSnapshot, type MemberTx, type MarketSnapshot } from "../lib/api";
 import { StatCard, Card, PageHeader, RiskNotice, Badge, Empty } from "../components/ui";
+import { AllocationChart } from "../components/AllocationChart";
 import { formatMoney, formatUnits, formatPercent, toJalali, toPersianDigits } from "../lib/format";
 import { useSettings } from "../context/SettingsContext";
 import { txTypeLabel, txStatusTone, txStatusLabel, assetClassLabel } from "../lib/labels";
 
-const PIE_COLORS = ["#2f8659", "#4fa172", "#7fbf99", "#aed8bf", "#226b47", "#d6ecdf", "#94a3b8", "#f59e0b", "#3b82f6", "#8b5cf6", "#ec4899", "#14b8a6", "#f97316", "#64748b", "#eab308", "#06b6d4", "#a855f7"];
-
 const MARKET_CAT_LABEL: Record<string, string> = {
   FX: "ارز",
   GOLD: "طلا",
+  GOLD_TOKEN: "طلای توکنی (تترگلد / پکس‌گلد)",
   COIN: "سکه",
   SILVER: "نقره",
   CRYPTO: "رمزارز",
 };
-const MARKET_CAT_ORDER = ["FX", "GOLD", "COIN", "SILVER", "CRYPTO"];
+const MARKET_CAT_ORDER = ["FX", "GOLD", "GOLD_TOKEN", "COIN", "SILVER", "CRYPTO"];
 
 export default function Dashboard() {
   const { currency } = useSettings();
@@ -94,11 +91,7 @@ export default function Dashboard() {
     assets: Number(h.assetsValueRial),
   }));
 
-  const totalNavPositive = Number(data.totalNavRial) > 0;
   const categories = data.categories ?? [];
-  const pieData = categories
-    .filter((c) => Number(c.marketValueRial) > 0)
-    .map((c) => ({ name: assetClassLabel(c.category), value: Number(c.marketValueRial) }));
 
   const compact = (v: number) =>
     toPersianDigits(new Intl.NumberFormat("en-US", { notation: "compact" }).format(v));
@@ -190,8 +183,8 @@ export default function Dashboard() {
         </p>
       </Card>
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-        <Card className="lg:col-span-2">
+      <div className="grid grid-cols-1 gap-6">
+        <Card>
           <h3 className="mb-4 font-semibold text-slate-700">روند NAV هر واحد</h3>
           {chartData.length === 0 ? (
             <div className="py-12 text-center text-sm text-slate-400">
@@ -223,38 +216,8 @@ export default function Dashboard() {
           )}
         </Card>
 
-        <Card>
-          <h3 className="mb-4 font-semibold text-slate-700">تخصیص دارایی بر اساس دسته</h3>
-          {!totalNavPositive ? (
-            <div className="py-12 text-center text-sm text-slate-400">
-              خالص ارزش دارایی صفر یا منفی است؛ نمودار تخصیص قابل نمایش نیست.
-            </div>
-          ) : pieData.length === 0 ? (
-            <div className="py-12 text-center text-sm text-slate-400">
-              دارایی‌ای برای نمایش نیست.
-            </div>
-          ) : (
-            <ResponsiveContainer width="100%" height={280}>
-              <PieChart>
-                <Pie
-                  data={pieData}
-                  dataKey="value"
-                  nameKey="name"
-                  innerRadius={55}
-                  outerRadius={95}
-                  paddingAngle={2}
-                  label={(e) => e.name}
-                >
-                  {pieData.map((_, i) => (
-                    <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
-                  ))}
-                </Pie>
-                <Tooltip
-                  formatter={(v: number) => formatMoney(String(v), currency)}
-                />
-              </PieChart>
-            </ResponsiveContainer>
-          )}
+        <Card className="p-6">
+          <AllocationChart categories={categories} currency={currency} />
         </Card>
       </div>
 
