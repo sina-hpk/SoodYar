@@ -35,7 +35,31 @@ const LUMP_CLASSES = new Set([
   "OTHER",
 ]);
 
-type TradeMode = "UNIT" | "TOTAL";
+/**
+ * UNIT   — quantity × price per unit, for anything with a real market price.
+ * TOTAL  — one whole amount. On a buy it becomes a single lot; on a sale it
+ *          closes the position completely.
+ * WITHDRAW — takes money out of a lump-sum holding without closing it, by selling
+ *          the fraction of a lot that carries the requested amount at its own
+ *          average cost. Only offered for lump-sum classes on a sale.
+ */
+type TradeMode = "UNIT" | "TOTAL" | "WITHDRAW";
+
+/** Quantity decimals the API accepts (Decimal(8) in the schema). */
+const QTY_DP = 8;
+
+/**
+ * The fraction of a lump-sum holding that carries `amountRial` at the holding's
+ * average cost. Truncated rather than rounded so a withdrawal never asks for more
+ * than the position holds.
+ */
+function withdrawQuantity(amountRial: number, avgCostRial: number): number {
+  if (!Number.isFinite(amountRial) || !Number.isFinite(avgCostRial) || avgCostRial <= 0) {
+    return NaN;
+  }
+  const factor = 10 ** QTY_DP;
+  return Math.floor((amountRial / avgCostRial) * factor) / factor;
+}
 
 /** Parses a possibly-Persian numeric string to a number; NaN when unusable. */
 function num(v: string): number {
@@ -106,10 +130,12 @@ export default function Portfolio() {
 
   const [newAsset, setNewAsset] = useState({ symbol: "", name: "", assetClass: "STOCK" });
   const [tradeMode, setTradeMode] = useState<TradeMode>("UNIT");
+  const [cashRial, setCashRial] = useState<number | null>(null);
   const [trade, setTrade] = useState({
     quantity: "",
     pricePerUnitRial: "",
     totalRial: "",
+    withdrawRial: "",
     feeRial: "",
     effectiveDate: todayIso(),
   });
@@ -126,6 +152,12 @@ export default function Portfolio() {
       setAssets(await api.assets());
     } catch (e) {
       toast((e as Error).message, "error");
+    }
+    // Cash balance only powers a warning, so a failure must not block the page.
+    try {
+      setCashRial(Number((await api.dashboard()).cashBalanceRial));
+    } catch {
+      setCashRial(null);
     }
   }
   useEffect(() => {
@@ -190,7 +222,36 @@ export default function Portfolio() {
     let quantity = trade.quantity;
     let pricePerUnitRial = num(trade.pricePerUnitRial);
 
-    if (tradeMode === "TOTAL") {
+    if (tradeMode === "WITHDRAW") {
+      const amount = num(trade.withdrawRial);
+      const avg = num(asset.avgCostRial);
+      const held = num(asset.quantity);
+      if (!Number.isFinite(amount) || amount <= 0) {
+        toast("مبلغ برداشت را وارد کنید", "error");
+        setConfirmTrade(false);
+        return;
+      }
+      if (!Number.isFinite(avg) || avg <= 0 || !Number.isFinite(held) || held <= 0) {
+        toast("این دارایی بهای تمام‌شده یا موجودی ندارد", "error");
+        setConfirmTrade(false);
+        return;
+      }
+      const q = withdrawQuantity(amount, avg);
+      if (!Number.isFinite(q) || q <= 0) {
+        toast("مبلغ برداشت از دقت قابل ثبت کمتر است", "error");
+        setConfirmTrade(false);
+        return;
+      }
+      if (q > held) {
+        toast("مبلغ برداشت از ارزش دفتری این دارایی بیشتر است", "error");
+        setConfirmTrade(false);
+        return;
+      }
+      // Selling at the average cost is what keeps a book-value withdrawal from
+      // inventing a gain or a loss.
+      quantity = q.toFixed(QTY_DP);
+      pricePerUnitRial = Math.round(avg);
+    } else if (tradeMode === "TOTAL") {
       const total = num(trade.totalRial);
       if (!Number.isFinite(total) || total <= 0) {
         toast("مبلغ کل را وارد کنید", "error");
@@ -246,18 +307,22 @@ export default function Portfolio() {
       quantity: "",
       pricePerUnitRial: "",
       totalRial: "",
+      withdrawRial: "",
       feeRial: "",
       effectiveDate: todayIso(),
     });
   }
 
   /**
-   * Opens the trade modal, defaulting to lump-sum entry for assets that have no
-   * meaningful per-unit price (a car, an apartment, a fixed-income fund).
+   * Opens the trade modal. Lump-sum holdings have no meaningful per-unit price, so
+   * they default to whole-amount entry — and on a sale to «برداشت مبلغ», because
+   * taking part of the money out is the common case and closing the position
+   * outright is the rare one.
    */
   function openTrade(mode: "BUY" | "SELL", asset: AssetValuation) {
     resetTrade();
-    setTradeMode(LUMP_CLASSES.has(asset.assetClass) ? "TOTAL" : "UNIT");
+    const lump = LUMP_CLASSES.has(asset.assetClass);
+    setTradeMode(lump ? (mode === "SELL" ? "WITHDRAW" : "TOTAL") : "UNIT");
     setTradeOpen({ mode, asset });
   }
 
@@ -348,6 +413,98 @@ export default function Portfolio() {
     } finally {
       setBusy(false);
     }
+  }
+
+  /**
+   * What the pending trade would actually do, recomputed as the user types. It
+   * mirrors the server's arithmetic closely enough to preview the cash movement and
+   * the realized P&L, so the confirmation step can name the consequence instead of
+   * only repeating the numbers that were typed.
+   */
+  const preview = useMemo(() => {
+    if (!tradeOpen) return null;
+    const asset = tradeOpen.asset;
+    const fee = num(trade.feeRial) || 0;
+    const avg = num(asset.avgCostRial);
+    const held = num(asset.quantity);
+
+    let qty = NaN;
+    let price = NaN;
+    if (tradeMode === "WITHDRAW") {
+      qty = withdrawQuantity(num(trade.withdrawRial), avg);
+      price = avg;
+    } else if (tradeMode === "TOTAL") {
+      const total = num(trade.totalRial);
+      if (tradeOpen.mode === "BUY") {
+        qty = 1;
+        price = total;
+      } else {
+        qty = held;
+        price = held > 0 ? total / held : NaN;
+      }
+    } else {
+      qty = num(trade.quantity);
+      price = num(trade.pricePerUnitRial);
+    }
+    if (!Number.isFinite(qty) || !Number.isFinite(price) || qty <= 0) return null;
+
+    const gross = qty * price;
+    if (tradeOpen.mode === "BUY") {
+      const cashOut = gross + (Number.isFinite(fee) ? fee : 0);
+      return {
+        kind: "BUY" as const,
+        qty,
+        gross,
+        cashOut,
+        // Only flag it when the balance is actually known.
+        overdraft: cashRial != null && cashOut > cashRial ? cashOut - cashRial : 0,
+      };
+    }
+    const costOfSold = avg * qty;
+    const proceeds = gross - (Number.isFinite(fee) ? fee : 0);
+    const realized = proceeds - costOfSold;
+    return {
+      kind: "SELL" as const,
+      qty,
+      gross,
+      proceeds,
+      costOfSold,
+      realized,
+      remainingValue: Math.max(0, (held - qty) * avg),
+      closesPosition: qty >= held - 1e-8,
+      /**
+       * A sale that returns less than half of what the sold quantity cost is
+       * almost always a units/price mix-up rather than a real 50% loss, so it
+       * gets an explicit warning before it is written to the ledger.
+       */
+      suspiciousLoss: costOfSold > 0 && proceeds < costOfSold / 2,
+    };
+  }, [tradeOpen, tradeMode, trade, cashRial]);
+
+  /** Names the consequence of the trade rather than echoing the typed numbers. */
+  function confirmMessage(): string {
+    if (!tradeOpen) return "";
+    const sym = tradeOpen.asset.symbol;
+    const money = (v: number) => formatMoney(String(Math.round(v)), currency);
+    if (!preview) {
+      return `آیا از ثبت این ${tradeOpen.mode === "BUY" ? "خرید" : "فروش"} روی ${sym} اطمینان دارید؟`;
+    }
+    if (preview.kind === "BUY") {
+      const base = `آیا از ثبت خرید ${sym} به مبلغ ${money(preview.cashOut)} اطمینان دارید؟ این مبلغ از موجودی نقد صندوق کم می‌شود.`;
+      return preview.overdraft > 0
+        ? `${base} توجه: این خرید ${money(preview.overdraft)} بیشتر از موجودی نقد است و نقد صندوق را منفی می‌کند.`
+        : base;
+    }
+    if (preview.suspiciousLoss) {
+      return `این فروش ${money(preview.proceeds)} به نقد اضافه می‌کند، در حالی که بهای تمام‌شدهٔ همین مقدار ${money(preview.costOfSold)} است؛ یعنی زیانی به مبلغ ${money(-preview.realized)} ثبت می‌شود${preview.closesPosition ? " و موقعیت کاملاً بسته می‌شود" : ""}. اگر منظورتان برداشت بخشی از پول این دارایی بود، انصراف بدهید و حالت «برداشت مبلغ» را انتخاب کنید.`;
+    }
+    if (tradeMode === "WITHDRAW") {
+      return `آیا از برداشت ${money(preview.proceeds)} از ${sym} اطمینان دارید؟ این مبلغ به موجودی نقد اضافه می‌شود، ارزش دفتری این دارایی ${money(preview.remainingValue)} می‌ماند و سود یا زیانی ثبت نمی‌شود.`;
+    }
+    if (preview.closesPosition) {
+      return `آیا از فروش کل موجودی ${sym} به مبلغ ${money(preview.proceeds)} اطمینان دارید؟ موقعیت بسته می‌شود و ${money(preview.realized)} سود / زیان محقق‌شده ثبت می‌گردد.`;
+    }
+    return `آیا از فروش ${formatUnits(String(preview.qty), 8)} واحد ${sym} به مبلغ ${money(preview.proceeds)} اطمینان دارید؟ ${money(preview.realized)} سود / زیان محقق‌شده ثبت می‌شود و ${money(preview.remainingValue)} از این دارایی باقی می‌ماند.`;
   }
 
   return (
@@ -676,6 +833,16 @@ export default function Portfolio() {
         <div className="mb-4">
           <label className="label">نحوهٔ ثبت</label>
           <div className="flex flex-wrap gap-2">
+            {tradeOpen?.mode === "SELL" && LUMP_CLASSES.has(tradeOpen.asset.assetClass) && (
+              <button
+                className={`badge px-3 py-1.5 ${
+                  tradeMode === "WITHDRAW" ? "bg-brand-600 text-white" : "bg-slate-100 text-slate-700"
+                }`}
+                onClick={() => setTradeMode("WITHDRAW")}
+              >
+                برداشت مبلغ
+              </button>
+            )}
             <button
               className={`badge px-3 py-1.5 ${
                 tradeMode === "UNIT" ? "bg-brand-600 text-white" : "bg-slate-100 text-slate-700"
@@ -690,17 +857,42 @@ export default function Portfolio() {
               }`}
               onClick={() => setTradeMode("TOTAL")}
             >
-              مبلغ کل (یک‌جا)
+              {tradeOpen?.mode === "SELL" ? "فروش کامل (بستن موقعیت)" : "مبلغ کل (یک‌جا)"}
             </button>
           </div>
           <p className="mt-2 text-xs leading-6 text-slate-500">
-            {tradeMode === "UNIT"
-              ? "برای سهم، صندوق سهامی، طلا، ارز و رمزارز که «هر واحد» قیمت مشخصی دارد."
-              : "برای خودرو، ملک، صندوق درآمد ثابت و هر چیزی که قیمت هر واحد ندارد؛ فقط مبلغ کل را وارد کنید."}
+            {tradeMode === "WITHDRAW"
+              ? "بخشی از پول این دارایی را نقد می‌کنید و موقعیت باز می‌ماند؛ فقط مبلغ را بنویسید، مقدار خودش حساب می‌شود."
+              : tradeMode === "UNIT"
+                ? "برای سهم، صندوق سهامی، طلا، ارز و رمزارز که «هر واحد» قیمت مشخصی دارد."
+                : tradeOpen?.mode === "SELL"
+                  ? "کل موجودی این دارایی فروخته و موقعیت بسته می‌شود."
+                  : "برای خودرو، ملک، صندوق درآمد ثابت و هر چیزی که قیمت هر واحد ندارد؛ فقط مبلغ کل را وارد کنید."}
           </p>
         </div>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          {tradeMode === "UNIT" ? (
+          {tradeMode === "WITHDRAW" ? (
+            <div className="sm:col-span-2">
+              <label className="label">چقدر برداشت می‌کنید؟ (ریال)</label>
+              <input
+                className="input tabular"
+                placeholder="مثلاً ۱۰۰۰۰۰۰۰۰"
+                value={trade.withdrawRial}
+                onChange={(e) => setTrade({ ...trade, withdrawRial: e.target.value })}
+              />
+              {!!num(trade.withdrawRial) && (
+                <p className="mt-1 text-xs text-slate-500">
+                  {formatMoney(String(Math.round(num(trade.withdrawRial))), currency)}
+                </p>
+              )}
+              <p className="mt-2 text-xs leading-6 text-slate-500">
+                ارزش دفتری فعلی:{" "}
+                <span className="tabular font-medium text-slate-700">
+                  {formatMoney(tradeOpen?.asset.remainingCostBasisRial ?? "0", currency)}
+                </span>
+              </p>
+            </div>
+          ) : tradeMode === "UNIT" ? (
             <>
               <div>
                 <label className="label">مقدار</label>
@@ -760,9 +952,68 @@ export default function Portfolio() {
               : "کل موجودی این دارایی به این مبلغ فروخته می‌شود و موقعیت بسته خواهد شد."}
           </p>
         )}
+
+        {/* Live consequence of the numbers above, so surprises surface before the write. */}
+        {preview?.kind === "SELL" && (
+          <div className="mt-3 space-y-1 rounded-lg bg-slate-50 px-3 py-2 text-xs leading-6">
+            <div className="flex justify-between gap-2">
+              <span className="text-slate-500">مقداری که فروخته می‌شود</span>
+              <span className="tabular font-medium text-slate-700">{formatUnits(String(preview.qty), 8)}</span>
+            </div>
+            <div className="flex justify-between gap-2">
+              <span className="text-slate-500">به نقد اضافه می‌شود</span>
+              <span className="tabular font-medium text-slate-700">
+                {formatMoney(String(Math.round(preview.proceeds)), currency)}
+              </span>
+            </div>
+            <div className="flex justify-between gap-2">
+              <span className="text-slate-500">سود / زیان محقق‌شده</span>
+              <span
+                className={`tabular font-medium ${
+                  Math.round(preview.realized) > 0
+                    ? "text-green-600"
+                    : Math.round(preview.realized) < 0
+                      ? "text-red-600"
+                      : "text-slate-700"
+                }`}
+              >
+                {formatMoney(String(Math.round(preview.realized)), currency)}
+              </span>
+            </div>
+            <div className="flex justify-between gap-2">
+              <span className="text-slate-500">باقی‌ماندهٔ این دارایی</span>
+              <span className="tabular font-medium text-slate-700">
+                {preview.closesPosition
+                  ? "صفر — موقعیت بسته می‌شود"
+                  : formatMoney(String(Math.round(preview.remainingValue)), currency)}
+              </span>
+            </div>
+          </div>
+        )}
+        {preview?.kind === "SELL" && preview.suspiciousLoss && (
+          <p className="mt-2 rounded-lg border-r-4 border-red-400 bg-red-50 px-3 py-2 text-xs leading-6 text-red-800">
+            این فروش زیانی به مبلغ {formatMoney(String(Math.round(-preview.realized)), currency)} ثبت
+            می‌کند، یعنی بیش از نصف بهای تمام‌شدهٔ مقداری که می‌فروشید. اگر واقعاً چنین زیانی نداده‌اید،
+            احتمالاً «مقدار» و «قیمت هر واحد» با واحد اشتباهی وارد شده‌اند — برای برداشت بخشی از پول
+            یک دارایی یک‌جا، حالت «برداشت مبلغ» را انتخاب کنید.
+          </p>
+        )}
+        {preview?.kind === "BUY" && preview.overdraft > 0 && (
+          <p className="mt-2 rounded-lg border-r-4 border-amber-400 bg-amber-50 px-3 py-2 text-xs leading-6 text-amber-800">
+            موجودی نقد صندوق {formatMoney(String(Math.round(cashRial ?? 0)), currency)} است و این خرید{" "}
+            {formatMoney(String(Math.round(preview.overdraft)), currency)} از آن بیشتر است؛ با ثبت آن نقد
+            صندوق منفی می‌شود. اول واریز عضو یا فروش دارایی را ثبت کنید.
+          </p>
+        )}
+
         {tradeOpen?.mode === "BUY" ? (
           <p className="mt-3 text-xs text-slate-500">
             کارمزد خرید به بهای تمام‌شده افزوده می‌شود و در میانگین موزون خرید لحاظ می‌گردد.
+          </p>
+        ) : tradeMode === "WITHDRAW" ? (
+          <p className="mt-3 flex items-center gap-1 text-xs text-slate-500">
+            <Tag size={14} /> برداشت به ارزش دفتری انجام می‌شود، پس سود یا زیانی نمی‌سازد. سود صندوق را
+            جداگانه با دکمهٔ «سود / هزینه» ثبت کنید.
           </p>
         ) : (
           <p className="mt-3 flex items-center gap-1 text-xs text-slate-500">
@@ -773,14 +1024,18 @@ export default function Portfolio() {
 
       <ConfirmDialog
         open={confirmTrade}
-        title="تأیید تراکنش"
-        danger={tradeOpen?.mode === "SELL"}
-        message={
-          tradeMode === "TOTAL"
-            ? `آیا از ثبت ${tradeOpen?.mode === "BUY" ? "خرید" : "فروش"} ${tradeOpen?.asset.symbol} به مبلغ کل ${formatMoney(String(Math.round(num(trade.totalRial) || 0)), currency)} اطمینان دارید؟ این عملیات موجودی نقد سبد را تغییر می‌دهد.`
-            : `آیا از ثبت ${tradeOpen?.mode === "BUY" ? "خرید" : "فروش"} ${trade.quantity} واحد ${tradeOpen?.asset.symbol} اطمینان دارید؟ این عملیات موجودی نقد سبد را تغییر می‌دهد.`
+        title={
+          preview?.kind === "SELL" && preview.suspiciousLoss
+            ? "این فروش زیان بزرگی ثبت می‌کند"
+            : "تأیید تراکنش"
         }
-        confirmLabel="بله، ثبت شود"
+        danger={tradeOpen?.mode === "SELL"}
+        message={confirmMessage()}
+        confirmLabel={
+          preview?.kind === "SELL" && preview.suspiciousLoss
+            ? "می‌دانم، ثبت شود"
+            : "بله، ثبت شود"
+        }
         onConfirm={submitTrade}
         onCancel={() => setConfirmTrade(false)}
       />

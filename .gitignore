@@ -25,6 +25,10 @@ server/prisma/*.db-journal
 backups/
 *.bak
 
+# One-off data-repair scripts. They hardcode real record ids, amounts and asset
+# names from the local ledger, so they stay on the machine that needs them.
+server/scripts/
+
 # Logs
 logs/
 *.log
