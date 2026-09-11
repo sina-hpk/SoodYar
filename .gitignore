@@ -47,3 +47,7 @@ web/dist/
 
 # Local ZCode session state
 .zcode/
+
+# Scratch files from local diff/data scans
+scan.tmp
+*.tmp
