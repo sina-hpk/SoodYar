@@ -44,3 +44,6 @@ Thumbs.db
 
 # Vite
 web/dist/
+
+# Local ZCode session state
+.zcode/

@@ -8,15 +8,27 @@ import {
   Trash2,
   Coins,
   Calculator,
+  RefreshCw,
 } from "lucide-react";
-import { api, type AssetValuation, type MarketQuote } from "../lib/api";
+import {
+  api,
+  type AssetValuation,
+  type MarketQuote,
+  type PricePlanRow,
+} from "../lib/api";
 import { Card, PageHeader, Badge, Empty, RiskNotice } from "../components/ui";
 import { Modal } from "../components/Modal";
 import { ConfirmDialog } from "../components/Modal";
 import { JalaliDateInput } from "../components/JalaliDateInput";
 import { useToast } from "../components/Toast";
 import { useSettings } from "../context/SettingsContext";
-import { formatMoney, formatUnits, formatPercent, todayIso } from "../lib/format";
+import {
+  formatMoney,
+  formatUnits,
+  formatPercent,
+  todayIso,
+  toPersianDigits,
+} from "../lib/format";
 import { assetClassLabel, ASSET_CLASSES } from "../lib/labels";
 
 /**
@@ -79,17 +91,48 @@ function norm(s: string): string {
     .replace(/[۰-۹]/g, (d) => "0123456789"["۰۱۲۳۴۵۶۷۸۹".indexOf(d)]);
 }
 
+/**
+ * Allows containment matching for descriptive names, but never between two
+ * ticker-like ASCII symbols. In particular, USD and USDT may only match
+ * exactly; a ticker prefix is not evidence that they represent the same asset.
+ */
+function isSafeFuzzyMatch(left: string, right: string): boolean {
+  if (left.length < 3 || right.length < 3) return false;
+  const contained = left.includes(right) || right.includes(left);
+  if (!contained) return false;
+
+  // Preserve existing containment matching for other assets, but do not treat a
+  // USD-prefixed ticker (USDT, USDC, ...) as the USD cash benchmark.
+  const shorter = left.length <= right.length ? left : right;
+  const longer = left.length > right.length ? left : right;
+  if (shorter === "usd" && /^usd[a-z0-9]+$/.test(longer)) return false;
+  return true;
+}
+
 /** Best-effort match of an asset to a live market quote by symbol/name. */
 function matchQuote(asset: AssetValuation, quotes: MarketQuote[]): MarketQuote | null {
   const sym = norm(asset.symbol);
   const nm = norm(asset.name);
-  for (const q of quotes) {
-    const qsym = norm(q.symbol);
-    const qname = norm(q.name);
-    if (sym && (sym === qsym || sym.includes(qsym) || qsym.includes(sym))) return q;
-    if (nm && (nm === qname || nm.includes(qname) || qname.includes(nm))) return q;
-  }
-  return null;
+  const normalized = quotes.map((quote) => ({
+    quote,
+    symbol: norm(quote.symbol),
+    name: norm(quote.name),
+  }));
+
+  // Search every quote for an exact identity before considering any fuzzy hit.
+  const exact = normalized.find(
+    (candidate) =>
+      (sym && sym === candidate.symbol) ||
+      (nm && nm === candidate.name)
+  );
+  if (exact) return exact.quote;
+
+  const fuzzy = normalized.find(
+    (candidate) =>
+      (sym && isSafeFuzzyMatch(sym, candidate.symbol)) ||
+      (nm && isSafeFuzzyMatch(nm, candidate.name))
+  );
+  return fuzzy?.quote ?? null;
 }
 
 /** Small colored P&L cell that shows amount + return percent. */
@@ -112,6 +155,28 @@ function PnlCell({
   );
 }
 
+/**
+ * Persian labels for the auto-pricing state. The server reports stable codes;
+ * the review table must not show them to the user verbatim.
+ */
+const PRICE_STATUS_LABELS: Record<string, string> = {
+  PINNED: "کلید دستی",
+  EXACT: "تطبیق دقیق",
+  ALIAS: "نرخ داخلی",
+  FUZZY: "تطبیق تقریبی",
+  UPDATED: "ثبت شد",
+  DRY_RUN: "آمادهٔ ثبت",
+  SKIPPED_MANUAL: "قیمت دستی امروز",
+  SKIPPED_NO_POSITION: "بدون موجودی",
+  NO_PRICE: "بدون قیمت",
+  UNMATCHED: "بدون نرخ زنده",
+};
+
+function priceStatusLabel(value: string | null | undefined): string {
+  if (!value) return "—";
+  return PRICE_STATUS_LABELS[value] ?? value;
+}
+
 export default function Portfolio() {
   const { currency } = useSettings();
   const toast = useToast();
@@ -127,6 +192,9 @@ export default function Portfolio() {
   const [valueOpen, setValueOpen] = useState<AssetValuation | null>(null);
   const [cashOpen, setCashOpen] = useState<null | { asset: AssetValuation | null }>(null);
   const [busy, setBusy] = useState(false);
+  const [autoPlanOpen, setAutoPlanOpen] = useState(false);
+  const [autoPlan, setAutoPlan] = useState<PricePlanRow[]>([]);
+  const [autoBusy, setAutoBusy] = useState(false);
 
   const [newAsset, setNewAsset] = useState({ symbol: "", name: "", assetClass: "STOCK" });
   const [tradeMode, setTradeMode] = useState<TradeMode>("UNIT");
@@ -326,6 +394,41 @@ export default function Portfolio() {
     setTradeOpen({ mode, asset });
   }
 
+  /**
+   * Shows which live quote each holding maps to before writing anything, so an
+   * unreachable source or a missing match is visible instead of a silent no-op.
+   */
+  async function openAutoPlan() {
+    setAutoBusy(true);
+    try {
+      setAutoPlan(await api.priceAutoPlan());
+      setAutoPlanOpen(true);
+    } catch (error) {
+      toast((error as Error).message, "error");
+    } finally {
+      setAutoBusy(false);
+    }
+  }
+
+  async function refreshPricesFromMarket() {
+    setAutoBusy(true);
+    try {
+      const summary = await api.priceAutoRefresh({});
+      toast(
+        `${toPersianDigits(summary.updated)} قیمت به‌روز شد، ${toPersianDigits(
+          summary.skipped
+        )} مورد دست‌نخورده ماند`,
+        summary.updated > 0 ? "success" : "error"
+      );
+      setAutoPlan(await api.priceAutoPlan());
+      await load();
+    } catch (error) {
+      toast((error as Error).message, "error");
+    } finally {
+      setAutoBusy(false);
+    }
+  }
+
   async function deleteAsset() {
     if (!deleteTarget) return;
     setBusy(true);
@@ -514,6 +617,9 @@ export default function Portfolio() {
         subtitle="دارایی‌ها، خرید و فروش، سود/زیان و ارزش روز"
         action={
           <div className="flex gap-2">
+            <button className="btn-secondary" onClick={openAutoPlan} disabled={autoBusy}>
+              <RefreshCw size={18} className={autoBusy ? "animate-spin" : ""} /> قیمت‌های بازار
+            </button>
             <button
               className="btn-secondary"
               onClick={() => {
@@ -1039,6 +1145,69 @@ export default function Portfolio() {
         onConfirm={submitTrade}
         onCancel={() => setConfirmTrade(false)}
       />
+
+      {/* Automatic market pricing review */}
+      <Modal
+        open={autoPlanOpen}
+        onClose={() => setAutoPlanOpen(false)}
+        title="قیمت‌گیری خودکار از بازار"
+        footer={
+          <>
+            <button className="btn-primary" onClick={refreshPricesFromMarket} disabled={autoBusy}>
+              {autoBusy ? "در حال ثبت…" : "ثبت قیمت‌های امروز"}
+            </button>
+            <button className="btn-secondary" onClick={() => setAutoPlanOpen(false)}>
+              بستن
+            </button>
+          </>
+        }
+      >
+        <p className="mb-3 text-xs leading-6 text-slate-500">
+          هر دارایی به یک نرخ زنده وصل می‌شود و قیمت امروز ثبت می‌گردد. اگر امروز خودتان قیمتی ثبت کرده باشید،
+          دست‌نخورده می‌ماند. منبع فعلی: TGJU برای ارز، طلا، نقره و صندوق‌های کالایی.
+        </p>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[560px]">
+            <thead>
+              <tr className="border-b border-slate-100">
+                <th className="th">دارایی</th>
+                <th className="th">نرخ زنده</th>
+                <th className="th">قیمت (ریال)</th>
+                <th className="th">وضعیت</th>
+              </tr>
+            </thead>
+            <tbody>
+              {autoPlan.map((row) => (
+                <tr key={row.assetId} className="border-b border-slate-50">
+                  <td className="td">
+                    <div className="font-medium">{row.symbol}</div>
+                    <div className="text-xs text-slate-400">{row.name}</div>
+                  </td>
+                  <td className="td text-xs">{row.matchedName ?? "—"}</td>
+                  <td className="td tabular">{row.priceRial ? formatMoney(row.priceRial, currency) : "—"}</td>
+                  <td className="td">
+                    {row.confidence === "UNMATCHED" || row.confidence === "NO_PRICE" ? (
+                      <div>
+                        <Badge tone="amber">{priceStatusLabel(row.confidence)}</Badge>
+                        <div className="mt-1 text-[11px] leading-5 text-slate-500">{row.reason}</div>
+                      </div>
+                    ) : (
+                      <div>
+                        <Badge tone="green">{priceStatusLabel(row.status ?? row.confidence)}</Badge>
+                        <div className="mt-1 text-[11px] text-slate-400">{row.reason}</div>
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-6 text-amber-900">
+          سهام و صندوق‌های بورسی تهران از این دستگاه در دسترس نیستند و برای آن‌ها قیمت را دستی وارد کنید؛ دلیلش در
+          ستون وضعیت هر ردیف نوشته شده است.
+        </p>
+      </Modal>
 
       {/* Live market price modal */}
       <Modal

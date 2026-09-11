@@ -52,6 +52,12 @@ model Asset {
   // position is fully closed, so Closed Positions keep their history.
   realizedPnl  String   @default("0")
   isActive     Boolean  @default(true)
+  // Explicit live-quote pin: which market.ts quote key feeds this asset during
+  // auto price refresh. Null means the matcher decides (symbol/name/alias).
+  marketKey       String?
+  // Last time the auto-refresh scheduler wrote a PriceSnapshot for this asset.
+  // Null means auto-refresh has never touched it (manual prices stay manual).
+  lastAutoPriceAt DateTime?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
@@ -136,6 +142,48 @@ model PriceSnapshot {
 
   @@unique([assetId, priceDate])
   @@index([priceDate])
+}
+
+// Independent comparison instruments. Benchmarks are deliberately not Assets:
+// they never participate in portfolio holdings, NAV, WAC, or asset transactions.
+model BenchmarkInstrument {
+  key       String   @id // USD_IRR | GOLD18_IRR_GRAM | INFLATION_INDEX_IR
+  name      String
+  unit      String
+  // MARKET: a traded price the live market service can fetch.
+  // INDEX: a published index (e.g. consumer prices) fed only by manual/CSV rows.
+  kind      String   @default("MARKET")
+  marketKey String?  @unique // live market service key (usd | gram18); null for INDEX
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  prices BenchmarkPrice[]
+
+  @@index([isActive])
+}
+
+// Accepted/rejected dated observations for an independent benchmark.
+model BenchmarkPrice {
+  id                  String              @id @default(cuid())
+  instrumentKey       String
+  instrument          BenchmarkInstrument @relation(fields: [instrumentKey], references: [key])
+  priceRial           BigInt // positive integer rial
+  priceDate           DateTime // normalized market date, not ingestion timestamp
+  source              String // MANUAL | CSV | TGJU
+  sourceRef           String?
+  ingestMethod        String // MANUAL_JSON | CSV_JSON | LIVE_CAPTURE
+  ingestBatchId       String?
+  qualityStatus       String              @default("ACCEPTED") // ACCEPTED | REJECTED
+  marketDateConfirmed Boolean             @default(false)
+  note                String?
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
+
+  @@unique([instrumentKey, priceDate])
+  @@index([priceDate])
+  @@index([qualityStatus])
+  @@index([instrumentKey, qualityStatus, priceDate])
 }
 
 // Point-in-time NAV computation, reconstructable and dated.

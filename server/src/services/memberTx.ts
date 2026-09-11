@@ -8,6 +8,7 @@ import {
   assetMarketValue,
 } from "../lib/money.js";
 import { getPortfolioState, computeMemberUnits } from "./portfolio.js";
+import { rebuildAssetFromLedger } from "./assetRebuild.js";
 import { audit } from "./audit.js";
 
 /**
@@ -164,13 +165,6 @@ export async function createInKindContribution(input: ContributionInput) {
     });
 
     // 2) BUY the asset with exactly that cash → net cash effect is zero.
-    const oldQty = toDecimal(asset.quantity);
-    const oldBasis = oldQty.mul(toDecimal(asset.avgCost));
-    const addedBasis = toDecimal(contributionValue.toString());
-    const newQty = oldQty.add(qty);
-    const newAvg = newQty.lte(0)
-      ? new Decimal(0)
-      : oldBasis.add(addedBasis).div(newQty);
     await tx.portfolioTransaction.create({
       data: {
         type: "BUY",
@@ -185,13 +179,9 @@ export async function createInKindContribution(input: ContributionInput) {
         description: input.description ?? "آوردهٔ غیرنقدی",
       },
     });
-    await tx.asset.update({
-      where: { id: asset.id },
-      data: {
-        quantity: decToString(newQty),
-        avgCost: newAvg.toFixed(0, Decimal.ROUND_HALF_UP),
-      },
-    });
+    // Rebuild from the ledger so the holding follows effective-date order, the
+    // same rule every other trade path uses.
+    await rebuildAssetFromLedger(asset.id, tx);
 
     // 3) Record a same-day price so the holding has a real day value now.
     await tx.priceSnapshot.upsert({

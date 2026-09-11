@@ -148,3 +148,9 @@ export const settingSchema = z.object({
   key: z.string().min(1),
   value: z.string(),
 });
+
+// Pin (or clear) which live market quote key feeds an asset's auto price.
+// null/empty clears the pin so the matcher decides again.
+export const marketKeySchema = z.object({
+  marketKey: z.string().nullable(),
+});

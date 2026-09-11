@@ -210,11 +210,22 @@ export interface AssetPnlState {
  *   - BUY  adds (qty*price + fee) to the cost basis; avg cost is recomputed.
  *   - SELL realizes (proceeds - avgCost*qtySold); fee reduces proceeds.
  * Selling more than the held quantity throws (no short positions).
+ *
+ * `storedAverageCost` reproduces what the ledger writer does: it rounds the
+ * average cost to whole rial after every buy and carries that rounded figure
+ * forward (see buyAsset/sellAsset). Without it the replay keeps exact fractions
+ * and drifts away from the stored asset row, which matters for holdings that
+ * have no market price and are therefore valued at cost.
  */
-export function replayAssetLots(lots: AssetLot[]): AssetPnlState {
+export function replayAssetLots(
+  lots: AssetLot[],
+  options: { storedAverageCost?: boolean } = {}
+): AssetPnlState {
+  const stored = options.storedAverageCost === true;
   let qty = new Decimal(0);
   let costBasis = new Decimal(0); // total cost basis of remaining quantity
   let realized = new Decimal(0);
+  let avgRial = new Decimal(0); // rounded average carried forward in stored mode
 
   for (const lot of lots) {
     const q = toDecimal(lot.quantity);
@@ -223,21 +234,42 @@ export function replayAssetLots(lots: AssetLot[]): AssetPnlState {
 
     if (lot.type === "BUY") {
       if (q.lte(0)) throw new Error("مقدار خرید نامعتبر است");
-      costBasis = costBasis.add(q.mul(price)).add(fee);
-      qty = qty.add(q);
+      // In stored mode the previous basis is the rounded average times quantity,
+      // exactly as the writer recomputes it before adding the new purchase.
+      const oldBasis = stored ? qty.mul(avgRial) : costBasis;
+      const newQty = qty.add(q);
+      const newBasis = oldBasis.add(q.mul(price)).add(fee);
+      if (stored) {
+        avgRial = newQty.gt(0)
+          ? new Decimal(newBasis.div(newQty).toFixed(0, Decimal.ROUND_HALF_UP))
+          : new Decimal(0);
+        costBasis = newQty.mul(avgRial);
+      } else {
+        costBasis = newBasis;
+      }
+      qty = newQty;
     } else {
       if (q.lte(0)) throw new Error("مقدار فروش نامعتبر است");
       if (q.gt(qty)) throw new Error("موجودی دارایی کافی نیست");
-      const avgPerUnit = qty.gt(0) ? costBasis.div(qty) : new Decimal(0);
+      const avgPerUnit = stored
+        ? avgRial
+        : qty.gt(0)
+          ? costBasis.div(qty)
+          : new Decimal(0);
       const costOfSold = avgPerUnit.mul(q);
       const proceeds = q.mul(price).sub(fee);
-      realized = realized.add(proceeds.sub(costOfSold));
-      costBasis = costBasis.sub(costOfSold);
+      const gain = proceeds.sub(costOfSold);
+      // The writer stores each sale's P&L as whole rial and adds the integers.
+      realized = stored
+        ? realized.add(new Decimal(gain.toFixed(0, Decimal.ROUND_HALF_UP)))
+        : realized.add(gain);
+      costBasis = stored ? qty.sub(q).mul(avgRial) : costBasis.sub(costOfSold);
       qty = qty.sub(q);
       if (qty.lte(0)) {
         // Fully closed: clear any residual rounding in the basis.
         qty = new Decimal(0);
         costBasis = new Decimal(0);
+        avgRial = new Decimal(0);
       }
     }
   }

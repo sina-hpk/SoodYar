@@ -54,3 +54,447 @@ body {
     @apply px-3 py-2 text-right text-sm text-slate-700;
   }
 }
+
+/* ============================================================================
+   Theme system — dark / midnight
+   ----------------------------------------------------------------------------
+   The app is written with light Tailwind utilities, so dark themes are a pure
+   CSS override layer keyed on <html data-theme="…"> (no component rewrites).
+   Tailwind's @apply inlines colours into component classes, so .card/.input/…
+   are overridden explicitly in addition to the utility classes.
+   `light` has no data-theme attribute and therefore stays byte-for-byte the
+   current look.
+   ========================================================================= */
+
+/* --- Palette tokens ------------------------------------------------------ */
+
+/* dark ≈ slate-900 page, slate-800 surfaces, light slate text. */
+[data-theme="dark"] {
+  --app-bg: #0f172a;
+  --surface: #1e293b;
+  --surface-2: #17202e; /* inset chips / tracks (bg-slate-100) */
+  --surface-3: #202b3c; /* hover on inset surfaces (hover:bg-slate-200) */
+  --surface-70: rgba(148, 163, 184, 0.14); /* translucent raised box (bg-white/70) */
+  --wash-60: rgba(15, 23, 42, 0.55); /* bg-slate-50/60 over a card */
+  --wash-70: rgba(15, 23, 42, 0.62); /* bg-slate-50/70 over a card */
+  --field-bg: #16202f;
+  --text-strong: #f1f5f9;
+  --text-body: #e2e8f0;
+  --text-600: #cbd5e1;
+  --text-500: #a4b3c6;
+  --text-400: #8fa1b6;
+  --text-300: #5c6b80;
+  --border-soft: rgba(148, 163, 184, 0.11);
+  --border: rgba(148, 163, 184, 0.17);
+  --border-strong: rgba(148, 163, 184, 0.32);
+  --ring: rgba(148, 163, 184, 0.38);
+  --grid: rgba(148, 163, 184, 0.16);
+  --overlay: rgba(2, 6, 23, 0.66);
+  --toast-info: #334155;
+  --tooltip-bg: #1e293b;
+  --hover-1: rgba(148, 163, 184, 0.09);
+  --hover-2: rgba(148, 163, 184, 0.16);
+  --card-shadow: 0 1px 3px rgba(0, 0, 0, 0.45), 0 1px 2px rgba(0, 0, 0, 0.35);
+}
+
+/* midnight ≈ near-black page/surfaces with slightly higher-contrast text. */
+[data-theme="midnight"] {
+  --app-bg: #0b0f14;
+  --surface: #11161d;
+  --surface-2: #0e1319;
+  --surface-3: #1a222c;
+  --surface-70: rgba(160, 180, 205, 0.15);
+  --wash-60: rgba(0, 0, 0, 0.32);
+  --wash-70: rgba(0, 0, 0, 0.4);
+  --field-bg: #0d1218;
+  --text-strong: #f2f6fa;
+  --text-body: #dbe4ee;
+  --text-600: #c6d2df;
+  --text-500: #a3b3c6;
+  --text-400: #93a5ba;
+  --text-300: #5f7186;
+  --border-soft: rgba(160, 180, 205, 0.12);
+  --border: rgba(160, 180, 205, 0.18);
+  --border-strong: rgba(160, 180, 205, 0.34);
+  --ring: rgba(160, 180, 205, 0.4);
+  --grid: rgba(160, 180, 205, 0.17);
+  --overlay: rgba(0, 0, 0, 0.68);
+  --toast-info: #26313d;
+  --tooltip-bg: #161d26;
+  --hover-1: rgba(160, 180, 205, 0.1);
+  --hover-2: rgba(160, 180, 205, 0.17);
+  --card-shadow: 0 1px 3px rgba(0, 0, 0, 0.55), 0 1px 2px rgba(0, 0, 0, 0.45);
+}
+
+:is([data-theme="dark"], [data-theme="midnight"]) {
+  color-scheme: dark;
+}
+
+html:is([data-theme="dark"], [data-theme="midnight"]) {
+  background-color: var(--app-bg);
+}
+
+:is([data-theme="dark"], [data-theme="midnight"]) body {
+  background-color: var(--app-bg);
+  color: var(--text-body);
+}
+
+/* --- Component classes (@apply inlined light colours) -------------------- */
+
+:is([data-theme="dark"], [data-theme="midnight"]) .card {
+  background-color: var(--surface);
+  border-color: var(--border);
+  box-shadow: var(--card-shadow);
+}
+:is([data-theme="dark"], [data-theme="midnight"]) .btn-secondary {
+  background-color: var(--surface);
+  border-color: var(--border-strong);
+  color: var(--text-body);
+}
+:is([data-theme="dark"], [data-theme="midnight"]) .btn-secondary:hover {
+  background-color: var(--hover-2);
+}
+:is([data-theme="dark"], [data-theme="midnight"]) .input {
+  background-color: var(--field-bg);
+  border-color: var(--border-strong);
+  color: var(--text-body);
+}
+:is([data-theme="dark"], [data-theme="midnight"]) .input::placeholder {
+  color: var(--text-400);
+}
+:is([data-theme="dark"], [data-theme="midnight"]) .input:focus {
+  border-color: rgba(79, 161, 114, 0.8);
+  --tw-ring-color: rgba(79, 161, 114, 0.28);
+}
+:is([data-theme="dark"], [data-theme="midnight"]) .label {
+  color: var(--text-600);
+}
+/* .badge itself carries no colour; its tone utilities are overridden below. */
+:is([data-theme="dark"], [data-theme="midnight"]) .th {
+  color: var(--text-500);
+}
+:is([data-theme="dark"], [data-theme="midnight"]) .td {
+  color: var(--text-body);
+}
+
+/* --- Neutral utilities actually used in the app -------------------------- */
+
+:is([data-theme="dark"], [data-theme="midnight"]) .bg-white {
+  background-color: var(--surface);
+}
+:is([data-theme="dark"], [data-theme="midnight"]) .bg-white\/70 {
+  background-color: var(--surface-70);
+}
+:is([data-theme="dark"], [data-theme="midnight"]) .bg-slate-50 {
+  background-color: var(--app-bg);
+}
+:is([data-theme="dark"], [data-theme="midnight"]) .bg-slate-50\/60 {
+  background-color: var(--wash-60);
+}
+:is([data-theme="dark"], [data-theme="midnight"]) .bg-slate-50\/70 {
+  background-color: var(--wash-70);
+}
+:is([data-theme="dark"], [data-theme="midnight"]) .bg-slate-100 {
+  background-color: var(--surface-2);
+}
+:is([data-theme="dark"], [data-theme="midnight"]) .bg-slate-200\/70 {
+  background-color: var(--surface-70);
+}
+:is([data-theme="dark"], [data-theme="midnight"]) .bg-slate-800 {
+  background-color: var(--toast-info);
+}
+:is([data-theme="dark"], [data-theme="midnight"]) .bg-slate-900\/40 {
+  background-color: var(--overlay);
+}
+
+:is([data-theme="dark"], [data-theme="midnight"]) .text-slate-800 {
+  color: var(--text-strong);
+}
+:is([data-theme="dark"], [data-theme="midnight"]) .text-slate-700 {
+  color: var(--text-body);
+}
+:is([data-theme="dark"], [data-theme="midnight"]) .text-slate-600 {
+  color: var(--text-600);
+}
+:is([data-theme="dark"], [data-theme="midnight"]) .text-slate-500 {
+  color: var(--text-500);
+}
+:is([data-theme="dark"], [data-theme="midnight"]) .text-slate-400 {
+  color: var(--text-400);
+}
+:is([data-theme="dark"], [data-theme="midnight"]) .text-slate-300 {
+  color: var(--text-300);
+}
+
+:is([data-theme="dark"], [data-theme="midnight"]) .border-slate-50 {
+  border-color: var(--border-soft);
+}
+:is([data-theme="dark"], [data-theme="midnight"]) .border-slate-100 {
+  border-color: var(--border);
+}
+:is([data-theme="dark"], [data-theme="midnight"]) .border-slate-200 {
+  border-color: var(--border);
+}
+:is([data-theme="dark"], [data-theme="midnight"]) .border-slate-300 {
+  border-color: var(--border-strong);
+}
+
+:is([data-theme="dark"], [data-theme="midnight"]) .hover\:bg-slate-50:hover {
+  background-color: var(--hover-1);
+}
+:is([data-theme="dark"], [data-theme="midnight"]) .hover\:bg-slate-100:hover {
+  background-color: var(--hover-2);
+}
+:is([data-theme="dark"], [data-theme="midnight"]) .hover\:bg-slate-200:hover {
+  background-color: var(--surface-3);
+}
+:is([data-theme="dark"], [data-theme="midnight"]) .hover\:text-slate-600:hover {
+  color: var(--text-strong);
+}
+:is([data-theme="dark"], [data-theme="midnight"]) .ring-slate-200 {
+  --tw-ring-color: var(--ring);
+}
+:is([data-theme="dark"], [data-theme="midnight"]) .shadow-sm {
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+}
+
+/* --- Semantic tints: note/warning boxes keep their meaning --------------- */
+/* Semi-transparent tints composite over each theme's surfaces, so one set of
+   values works for both dark themes. Text shades are lifted to *-300/400 for
+   WCAG-AA contrast on dark surfaces. */
+
+/* amber — warnings */
+:is([data-theme="dark"], [data-theme="midnight"]) .bg-amber-50 {
+  background-color: rgba(245, 158, 11, 0.13);
+}
+:is([data-theme="dark"], [data-theme="midnight"]) .bg-amber-50\/30 {
+  background-color: rgba(245, 158, 11, 0.07);
+}
+:is([data-theme="dark"], [data-theme="midnight"]) .bg-amber-50\/70 {
+  background-color: rgba(245, 158, 11, 0.17);
+}
+:is([data-theme="dark"], [data-theme="midnight"]) .bg-amber-100 {
+  background-color: rgba(245, 158, 11, 0.2);
+}
+:is([data-theme="dark"], [data-theme="midnight"]) .hover\:bg-amber-100:hover {
+  background-color: rgba(245, 158, 11, 0.28);
+}
+:is([data-theme="dark"], [data-theme="midnight"]) .border-amber-200 {
+  border-color: rgba(245, 158, 11, 0.35);
+}
+:is([data-theme="dark"], [data-theme="midnight"]) .border-amber-300 {
+  border-color: rgba(245, 158, 11, 0.45);
+}
+:is([data-theme="dark"], [data-theme="midnight"]) .border-amber-400 {
+  border-color: rgba(251, 191, 36, 0.55);
+}
+:is([data-theme="dark"], [data-theme="midnight"]) .text-amber-900 {
+  color: #fcd34d;
+}
+:is([data-theme="dark"], [data-theme="midnight"]) .text-amber-800 {
+  color: #fbbf24;
+}
+:is([data-theme="dark"], [data-theme="midnight"]) .text-amber-700 {
+  color: #fbbf24;
+}
+:is([data-theme="dark"], [data-theme="midnight"]) .text-amber-600 {
+  color: #f59e0b;
+}
+
+/* blue — informational notes */
+:is([data-theme="dark"], [data-theme="midnight"]) .bg-blue-50 {
+  background-color: rgba(59, 130, 246, 0.14);
+}
+:is([data-theme="dark"], [data-theme="midnight"]) .bg-blue-50\/40 {
+  background-color: rgba(59, 130, 246, 0.09);
+}
+:is([data-theme="dark"], [data-theme="midnight"]) .bg-blue-100 {
+  background-color: rgba(59, 130, 246, 0.2);
+}
+:is([data-theme="dark"], [data-theme="midnight"]) .hover\:bg-blue-100:hover {
+  background-color: rgba(59, 130, 246, 0.28);
+}
+:is([data-theme="dark"], [data-theme="midnight"]) .border-blue-200 {
+  border-color: rgba(96, 165, 250, 0.35);
+}
+:is([data-theme="dark"], [data-theme="midnight"]) .text-blue-900 {
+  color: #bfdbfe;
+}
+:is([data-theme="dark"], [data-theme="midnight"]) .text-blue-800 {
+  color: #93c5fd;
+}
+:is([data-theme="dark"], [data-theme="midnight"]) .text-blue-700 {
+  color: #93c5fd;
+}
+:is([data-theme="dark"], [data-theme="midnight"]) .text-blue-600 {
+  color: #60a5fa;
+}
+
+/* violet — formula / explanatory accents */
+:is([data-theme="dark"], [data-theme="midnight"]) .bg-violet-50 {
+  background-color: rgba(139, 92, 246, 0.15);
+}
+:is([data-theme="dark"], [data-theme="midnight"]) .bg-violet-50\/40 {
+  background-color: rgba(139, 92, 246, 0.1);
+}
+:is([data-theme="dark"], [data-theme="midnight"]) .border-violet-200 {
+  border-color: rgba(167, 139, 250, 0.35);
+}
+:is([data-theme="dark"], [data-theme="midnight"]) .text-violet-900 {
+  color: #ddd6fe;
+}
+:is([data-theme="dark"], [data-theme="midnight"]) .text-violet-700 {
+  color: #c4b5fd;
+}
+:is([data-theme="dark"], [data-theme="midnight"]) .text-violet-600 {
+  color: #a78bfa;
+}
+
+/* red / rose — losses, destructive actions */
+:is([data-theme="dark"], [data-theme="midnight"]) .bg-red-50 {
+  background-color: rgba(239, 68, 68, 0.13);
+}
+:is([data-theme="dark"], [data-theme="midnight"]) .bg-red-100 {
+  background-color: rgba(239, 68, 68, 0.2);
+}
+:is([data-theme="dark"], [data-theme="midnight"]) .hover\:bg-red-50:hover {
+  background-color: rgba(239, 68, 68, 0.18);
+}
+:is([data-theme="dark"], [data-theme="midnight"]) .hover\:bg-red-100:hover {
+  background-color: rgba(239, 68, 68, 0.28);
+}
+:is([data-theme="dark"], [data-theme="midnight"]) .border-red-200 {
+  border-color: rgba(248, 113, 113, 0.35);
+}
+:is([data-theme="dark"], [data-theme="midnight"]) .border-red-400 {
+  border-color: rgba(248, 113, 113, 0.55);
+}
+:is([data-theme="dark"], [data-theme="midnight"]) .text-red-800 {
+  color: #fca5a5;
+}
+:is([data-theme="dark"], [data-theme="midnight"]) .text-red-700 {
+  color: #f87171;
+}
+:is([data-theme="dark"], [data-theme="midnight"]) .text-red-600 {
+  color: #f87171;
+}
+:is([data-theme="dark"], [data-theme="midnight"]) .text-red-500 {
+  color: #f87171;
+}
+:is([data-theme="dark"], [data-theme="midnight"]) .hover\:text-red-600:hover {
+  color: #f87171;
+}
+:is([data-theme="dark"], [data-theme="midnight"]) .bg-rose-50 {
+  background-color: rgba(244, 63, 94, 0.14);
+}
+:is([data-theme="dark"], [data-theme="midnight"]) .border-rose-200 {
+  border-color: rgba(251, 113, 133, 0.35);
+}
+:is([data-theme="dark"], [data-theme="midnight"]) .text-rose-600 {
+  color: #fb7185;
+}
+
+/* green / emerald / sky — profits, success, sky accents */
+:is([data-theme="dark"], [data-theme="midnight"]) .bg-green-50 {
+  background-color: rgba(34, 197, 94, 0.13);
+}
+:is([data-theme="dark"], [data-theme="midnight"]) .bg-green-100 {
+  background-color: rgba(34, 197, 94, 0.2);
+}
+:is([data-theme="dark"], [data-theme="midnight"]) .hover\:bg-green-100:hover {
+  background-color: rgba(34, 197, 94, 0.28);
+}
+:is([data-theme="dark"], [data-theme="midnight"]) .text-green-700 {
+  color: #4ade80;
+}
+:is([data-theme="dark"], [data-theme="midnight"]) .text-green-600 {
+  color: #4ade80;
+}
+:is([data-theme="dark"], [data-theme="midnight"]) .bg-emerald-50 {
+  background-color: rgba(16, 185, 129, 0.14);
+}
+:is([data-theme="dark"], [data-theme="midnight"]) .border-emerald-200 {
+  border-color: rgba(52, 211, 153, 0.35);
+}
+:is([data-theme="dark"], [data-theme="midnight"]) .text-emerald-600 {
+  color: #34d399;
+}
+:is([data-theme="dark"], [data-theme="midnight"]) .bg-sky-50 {
+  background-color: rgba(14, 165, 233, 0.14);
+}
+:is([data-theme="dark"], [data-theme="midnight"]) .border-sky-200 {
+  border-color: rgba(56, 189, 248, 0.35);
+}
+:is([data-theme="dark"], [data-theme="midnight"]) .text-sky-600 {
+  color: #38bdf8;
+}
+
+/* --- Brand green: text/tint contrast only -------------------------------- */
+/* The brand identity is untouched: .btn-primary (bg-brand-600 + text-white),
+   .btn-primary:hover (brand-700) and solid brand backgrounds keep their exact
+   values. Only the light-tinted brand surfaces are darkened and the matching
+   green text lifted — without this, text-brand-700 NAV values/headings would
+   sit at ~1.7:1 on dark cards, and brand text on a still-light chip would be
+   equally unreadable. Values chosen for >=4.5:1 on the resulting surfaces. */
+
+:is([data-theme="dark"], [data-theme="midnight"]) .bg-brand-50 {
+  background-color: rgba(79, 161, 114, 0.18);
+}
+:is([data-theme="dark"], [data-theme="midnight"]) .bg-brand-50\/60 {
+  background-color: rgba(79, 161, 114, 0.12);
+}
+:is([data-theme="dark"], [data-theme="midnight"]) .hover\:bg-brand-50:hover {
+  background-color: rgba(79, 161, 114, 0.26);
+}
+:is([data-theme="dark"], [data-theme="midnight"]) .hover\:bg-brand-100:hover {
+  background-color: rgba(79, 161, 114, 0.3);
+}
+:is([data-theme="dark"], [data-theme="midnight"]) .border-brand-300 {
+  border-color: rgba(127, 191, 153, 0.45);
+}
+:is([data-theme="dark"], [data-theme="midnight"]) .text-brand-800 {
+  color: #aed8bf;
+}
+:is([data-theme="dark"], [data-theme="midnight"]) .text-brand-700 {
+  color: #7fbf99;
+}
+:is([data-theme="dark"], [data-theme="midnight"]) .text-brand-600 {
+  color: #7fbf99;
+}
+:is([data-theme="dark"], [data-theme="midnight"]) .hover\:text-brand-600:hover {
+  color: #7fbf99;
+}
+
+/* --- Charts (recharts) ---------------------------------------------------- */
+/* SVG presentation attributes (stroke/fill="…" props) are overridden by CSS;
+   the tooltip uses inline styles, hence !important. Series colours stay as
+   authored — they are content colours, not chrome. */
+
+:is([data-theme="dark"], [data-theme="midnight"]) .recharts-cartesian-grid line {
+  stroke: var(--grid);
+}
+:is([data-theme="dark"], [data-theme="midnight"]) .recharts-cartesian-axis-line,
+:is([data-theme="dark"], [data-theme="midnight"]) .recharts-cartesian-axis-tick-line {
+  stroke: var(--border);
+}
+:is([data-theme="dark"], [data-theme="midnight"]) .recharts-text {
+  fill: var(--text-400);
+}
+:is([data-theme="dark"], [data-theme="midnight"]) .recharts-pie path {
+  stroke: var(--surface);
+}
+:is([data-theme="dark"], [data-theme="midnight"]) .recharts-tooltip-cursor {
+  stroke: var(--border-strong);
+}
+:is([data-theme="dark"], [data-theme="midnight"]) .recharts-default-tooltip {
+  background-color: var(--tooltip-bg) !important;
+  border-color: var(--border-strong) !important;
+  color: var(--text-body) !important;
+  border-radius: 8px;
+}
+:is([data-theme="dark"], [data-theme="midnight"]) .recharts-tooltip-item {
+  color: var(--text-body) !important;
+}
+:is([data-theme="dark"], [data-theme="midnight"]) .recharts-legend-item-text {
+  color: var(--text-600) !important;
+}

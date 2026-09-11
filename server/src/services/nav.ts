@@ -1,6 +1,7 @@
 import { prisma } from "../db.js";
 import { getPortfolioState } from "./portfolio.js";
-import { decToString } from "../lib/money.js";
+import { decToString, calculateNavPerUnit } from "../lib/money.js";
+import { getDefaultNavPerUnit } from "./settings.js";
 import { audit } from "./audit.js";
 import { bigintReplacer } from "./audit.js";
 
@@ -30,6 +31,22 @@ export async function commitNavSnapshot(navDate: Date, options: {
   note?: string;
   overwrite?: boolean;
 }) {
+  const today = new Date();
+  const normalizedToday = new Date(
+    Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate())
+  );
+  const normalizedNavDate = new Date(
+    Date.UTC(navDate.getUTCFullYear(), navDate.getUTCMonth(), navDate.getUTCDate())
+  );
+  if (normalizedNavDate.getTime() < normalizedToday.getTime()) {
+    throw new Error(
+      "ثبت NAV با وضعیت جاری برای تاریخ گذشته مجاز نیست. برای تاریخ گذشته از گزارش بازپخش as-of استفاده کنید."
+    );
+  }
+  if (normalizedNavDate.getTime() > normalizedToday.getTime()) {
+    throw new Error("تاریخ NAV نمی‌تواند بعد از امروز باشد.");
+  }
+  navDate = normalizedNavDate;
   const existing = await prisma.navSnapshot.findUnique({ where: { navDate } });
   if (existing && !options.overwrite) {
     throw new Error(
@@ -40,6 +57,12 @@ export async function commitNavSnapshot(navDate: Date, options: {
   const state = await getPortfolioState();
   const liabilities = options.liabilitiesRial ?? state.liabilitiesRial;
   const totalNav = state.cashBalanceRial + state.assetsValueRial - liabilities;
+  const defaultNav = await getDefaultNavPerUnit();
+  const navPerUnit = calculateNavPerUnit(
+    totalNav,
+    state.totalActiveUnits,
+    defaultNav
+  );
 
   const breakdown = JSON.stringify(
     {
@@ -67,7 +90,7 @@ export async function commitNavSnapshot(navDate: Date, options: {
     liabilitiesRial: liabilities,
     totalNavRial: totalNav,
     totalActiveUnits: decToString(state.totalActiveUnits),
-    navPerUnit: decToString(state.navPerUnit),
+    navPerUnit: decToString(navPerUnit),
     breakdown,
     note: options.note,
   };
@@ -79,7 +102,7 @@ export async function commitNavSnapshot(navDate: Date, options: {
   await audit("NAV_SNAPSHOT", "NavSnapshot", snap.id, {
     navDate: navDate.toISOString(),
     totalNavRial: totalNav,
-    navPerUnit: decToString(state.navPerUnit),
+    navPerUnit: decToString(navPerUnit),
     overwrite: !!existing,
   });
   return snap;

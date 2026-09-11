@@ -20,7 +20,8 @@ export type MarketCategory =
   | "GOLD_TOKEN"
   | "COIN"
   | "SILVER"
-  | "CRYPTO";
+  | "CRYPTO"
+  | "COMMODITY";
 
 export interface MarketQuote {
   key: string; // stable identifier, e.g. "usd", "btc", "gram18"
@@ -91,6 +92,26 @@ const TGJU_INSTRUMENTS: TgjuMap[] = [
   // category because they behave like gold but trade on crypto venues.
   { tgjuKey: "tether_gold_xaut", key: "xaut", symbol: "XAUT", name: "تتر گلد", category: "GOLD_TOKEN", unit: "هر واحد ≈ یک انس طلا", denom: "USD" },
   { tgjuKey: "crypto_paxg_gold", key: "paxg", symbol: "PAXG", name: "پکس گلد", category: "GOLD_TOKEN", unit: "هر واحد ≈ یک انس طلا", denom: "USD" },
+  // IME (Iran Mercantile Exchange) commodity funds, quoted in rial per fund
+  // unit. TGJU publishes the whole `ime_fund_*` family; the widely traded ones
+  // are mapped here so a holding can be pinned to its own ticker. Symbols are
+  // the funds' public tickers, names are the fund families as published.
+  { tgjuKey: "ime_fund_zar", key: "ime_fund_zar", symbol: "زر", name: "صندوق کالای زر", category: "COMMODITY", unit: "هر واحد صندوق", denom: "IRR" },
+  { tgjuKey: "ime_fund_simin", key: "ime_fund_simin", symbol: "سیمین", name: "صندوق کالای سیمین", category: "COMMODITY", unit: "هر واحد صندوق", denom: "IRR" },
+  { tgjuKey: "ime_fund_silver", key: "ime_fund_silver", symbol: "نقره", name: "صندوق کالای نقره", category: "COMMODITY", unit: "هر واحد صندوق", denom: "IRR" },
+  { tgjuKey: "ime_fund_safron", key: "ime_fund_safron", symbol: "سافرون", name: "صندوق کالای زعفران گنجینه زمین", category: "COMMODITY", unit: "هر واحد صندوق", denom: "IRR" },
+  { tgjuKey: "ime_fund_mesghal", key: "ime_fund_mesghal", symbol: "مثقال", name: "صندوق کالای مثقال", category: "COMMODITY", unit: "هر واحد صندوق", denom: "IRR" },
+  { tgjuKey: "ime_fund_kahroba", key: "ime_fund_kahroba", symbol: "کهربا", name: "صندوق کالای کهربا", category: "COMMODITY", unit: "هر واحد صندوق", denom: "IRR" },
+  { tgjuKey: "ime_fund_zomorod", key: "ime_fund_zomorod", symbol: "زمرد", name: "صندوق کالای زمرد", category: "COMMODITY", unit: "هر واحد صندوق", denom: "IRR" },
+  { tgjuKey: "ime_fund_zarvan", key: "ime_fund_zarvan", symbol: "زروان", name: "صندوق کالای زروان", category: "COMMODITY", unit: "هر واحد صندوق", denom: "IRR" },
+  { tgjuKey: "ime_fund_zarfam", key: "ime_fund_zarfam", symbol: "زرفام", name: "صندوق کالای زرفام", category: "COMMODITY", unit: "هر واحد صندوق", denom: "IRR" },
+  { tgjuKey: "ime_fund_zargar", key: "ime_fund_zargar", symbol: "زرگر", name: "صندوق کالای زرگر", category: "COMMODITY", unit: "هر واحد صندوق", denom: "IRR" },
+  { tgjuKey: "ime_fund_goldis", key: "ime_fund_goldis", symbol: "گلدیس", name: "صندوق کالای گلدیس", category: "COMMODITY", unit: "هر واحد صندوق", denom: "IRR" },
+  { tgjuKey: "ime_fund_gohar", key: "ime_fund_gohar", symbol: "گوهر", name: "صندوق کالای گوهر", category: "COMMODITY", unit: "هر واحد صندوق", denom: "IRR" },
+  { tgjuKey: "ime_fund_ganj", key: "ime_fund_ganj", symbol: "گنج", name: "صندوق کالای گنج", category: "COMMODITY", unit: "هر واحد صندوق", denom: "IRR" },
+  { tgjuKey: "ime_fund_javaher", key: "ime_fund_javaher", symbol: "جواهر", name: "صندوق کالای جواهر", category: "COMMODITY", unit: "هر واحد صندوق", denom: "IRR" },
+  { tgjuKey: "ime_fund_noghrin", key: "ime_fund_noghrin", symbol: "نقرین", name: "صندوق کالای نقرین", category: "COMMODITY", unit: "هر واحد صندوق", denom: "IRR" },
+  { tgjuKey: "ime_fund_nafis", key: "ime_fund_nafis", symbol: "نفیس", name: "صندوق کالای نفیس", category: "COMMODITY", unit: "هر واحد صندوق", denom: "IRR" },
 ];
 
 async function fetchJson(url: string): Promise<any> {

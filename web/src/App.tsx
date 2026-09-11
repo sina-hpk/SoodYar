@@ -9,6 +9,7 @@ import Portfolio from "./pages/Portfolio";
 import NavCalc from "./pages/NavCalc";
 import Transactions from "./pages/Transactions";
 import Reports from "./pages/Reports";
+import Analytics from "./pages/Analytics";
 import Audit from "./pages/Audit";
 import Glossary from "./pages/Glossary";
 import Settings from "./pages/Settings";
@@ -26,6 +27,7 @@ export default function App() {
             <Route path="/nav" element={<NavCalc />} />
             <Route path="/transactions" element={<Transactions />} />
             <Route path="/reports" element={<Reports />} />
+            <Route path="/analytics" element={<Analytics />} />
             <Route path="/audit" element={<Audit />} />
             <Route path="/glossary" element={<Glossary />} />
             <Route path="/settings" element={<Settings />} />

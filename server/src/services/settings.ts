@@ -6,6 +6,7 @@ const DEFAULTS: Record<string, string> = {
   [SETTING_KEYS.CURRENCY]: "RIAL",
   [SETTING_KEYS.WITHDRAWAL_WAIT_DAYS]: "3",
   [SETTING_KEYS.BACKUP_ENABLED]: "true",
+  [SETTING_KEYS.AUTO_PRICE_REFRESH_MINUTES]: "60",
 };
 
 export async function getSetting(key: string): Promise<string> {

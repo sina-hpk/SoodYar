@@ -1,7 +1,8 @@
 import Decimal from "decimal.js";
 import { prisma } from "../db.js";
-import { toDecimal, decToString, assetMarketValue } from "../lib/money.js";
+import { toDecimal, decToString, assetMarketValue, replayAssetLots } from "../lib/money.js";
 import { audit } from "./audit.js";
+import { rebuildAssetFromLedger } from "./assetRebuild.js";
 
 /**
  * Portfolio-level asset operations. BUY/SELL update the asset's quantity and
@@ -35,16 +36,6 @@ export async function buyAsset(input: BuyInput) {
   const fee = input.feeRial ?? 0n;
   const cashDelta = -(gross + fee); // cash leaves the portfolio (price + fee)
 
-  // Weighted-average cost is fee-inclusive: fold the fee into the incremental
-  // cost basis before recomputing the average.
-  const oldQty = toDecimal(asset.quantity);
-  const oldBasis = oldQty.mul(toDecimal(asset.avgCost));
-  const addedBasis = toDecimal(gross.toString()).add(toDecimal(fee.toString()));
-  const newQty = oldQty.add(buyQty);
-  const newAvg = newQty.lte(0)
-    ? new Decimal(0)
-    : oldBasis.add(addedBasis).div(newQty);
-
   const result = await prisma.$transaction(async (tx) => {
     const ptx = await tx.portfolioTransaction.create({
       data: {
@@ -60,24 +51,20 @@ export async function buyAsset(input: BuyInput) {
         description: input.description,
       },
     });
-    await tx.asset.update({
-      where: { id: input.assetId },
-      data: {
-        quantity: decToString(newQty),
-        avgCost: newAvg.toFixed(0, Decimal.ROUND_HALF_UP),
-      },
-    });
-    return ptx;
+    // The stored columns are rebuilt from the ledger in effective-date order, so
+    // a backdated purchase cannot leave the wallet disagreeing with history.
+    const rebuilt = await rebuildAssetFromLedger(input.assetId, tx);
+    return { ptx, rebuilt };
   });
 
-  await audit("ASSET_BUY", "PortfolioTransaction", result.id, {
+  await audit("ASSET_BUY", "PortfolioTransaction", result.ptx.id, {
     assetId: input.assetId,
     quantity: input.quantity,
     pricePerUnitRial: input.pricePerUnitRial,
     feeRial: fee,
-    newAvgCostRial: newAvg.toFixed(0),
+    newAvgCostRial: result.rebuilt.avgCostRial,
   });
-  return result;
+  return result.ptx;
 }
 
 export interface SellInput {
@@ -95,25 +82,28 @@ export async function sellAsset(input: SellInput) {
 
   const sellQty = new Decimal(input.quantity);
   if (sellQty.lte(0)) throw new Error("مقدار فروش نامعتبر است");
-  const currentQty = toDecimal(asset.quantity);
-  if (sellQty.gt(currentQty)) throw new Error("موجودی دارایی کافی نیست");
 
   const gross = assetMarketValue(sellQty, input.pricePerUnitRial);
   const fee = input.feeRial ?? 0n;
   const cashDelta = gross - fee; // net proceeds enter the portfolio
 
-  // Realized P&L = (proceeds - fee) - avgCost * qtySold.
-  const avgCost = toDecimal(asset.avgCost);
-  const costOfSold = avgCost.mul(sellQty);
-  const proceeds = toDecimal(gross.toString()).sub(toDecimal(fee.toString()));
-  const realized = proceeds.sub(costOfSold);
-  const realizedRial = BigInt(realized.toFixed(0, Decimal.ROUND_HALF_UP));
-
-  const newQty = currentQty.sub(sellQty);
-  // Average cost per remaining unit is unchanged on a sale (WAC method).
-  const prevRealized = BigInt(asset.realizedPnl || "0");
-
   const result = await prisma.$transaction(async (tx) => {
+    // Validate against the quantity held *on the effective date*, not the current
+    // wallet: a backdated sale must not consume units bought later.
+    const heldOnDate = await heldQuantityOnDate(input.assetId, input.effectiveDate, tx);
+    if (sellQty.gt(heldOnDate.qty)) {
+      throw new Error(
+        `در تاریخ ${input.effectiveDate.toISOString().slice(0, 10)} موجودی این دارایی ${heldOnDate.qty.toFixed(
+          8
+        )} بود و فروش ${sellQty.toFixed(8)} واحد ممکن نیست. تاریخ فروش را اصلاح کنید.`
+      );
+    }
+    const costOfSold = heldOnDate.avgCost.mul(sellQty);
+    const proceeds = toDecimal(gross.toString()).sub(toDecimal(fee.toString()));
+    const realizedRial = BigInt(
+      proceeds.sub(costOfSold).toFixed(0, Decimal.ROUND_HALF_UP)
+    );
+
     const ptx = await tx.portfolioTransaction.create({
       data: {
         type: "SELL",
@@ -128,25 +118,49 @@ export async function sellAsset(input: SellInput) {
         description: input.description,
       },
     });
-    await tx.asset.update({
-      where: { id: input.assetId },
-      data: {
-        quantity: decToString(newQty),
-        avgCost: newQty.lte(0) ? "0" : asset.avgCost,
-        realizedPnl: (prevRealized + realizedRial).toString(),
-      },
-    });
-    return ptx;
+    const rebuilt = await rebuildAssetFromLedger(input.assetId, tx);
+    return { ptx, rebuilt, realizedRial };
   });
 
-  await audit("ASSET_SELL", "PortfolioTransaction", result.id, {
+  await audit("ASSET_SELL", "PortfolioTransaction", result.ptx.id, {
     assetId: input.assetId,
     quantity: input.quantity,
     pricePerUnitRial: input.pricePerUnitRial,
     feeRial: fee,
-    realizedPnlRial: realizedRial,
+    realizedPnlRial: result.realizedRial,
+    quantityAfter: result.rebuilt.quantity,
   });
-  return result;
+  return result.ptx;
+}
+
+/** Quantity and average cost held immediately before `date` (before that day's trades). */
+async function heldQuantityOnDate(
+  assetId: string,
+  date: Date,
+  client: Pick<typeof prisma, "portfolioTransaction">
+): Promise<{ qty: Decimal; avgCost: Decimal }> {
+  const rows = await client.portfolioTransaction.findMany({
+    where: {
+      assetId,
+      status: "CONFIRMED",
+      type: { in: ["BUY", "SELL"] },
+      effectiveDate: { lt: date },
+    },
+    orderBy: [{ effectiveDate: "asc" }, { createdAt: "asc" }],
+  });
+  // Same-day trades are intentionally excluded: the new sale is dated that day,
+  // and ordering among same-day entries is by creation, so the check is against
+  // the position carried into the day.
+  const state = replayAssetLots(
+    rows.map((row) => ({
+      type: row.type as "BUY" | "SELL",
+      quantity: row.quantity,
+      priceRial: row.pricePerUnit ?? "0",
+      feeRial: row.feeRial,
+    })),
+    { storedAverageCost: true }
+  );
+  return { qty: state.quantity, avgCost: state.avgCostRial };
 }
 
 export interface CashOpInput {

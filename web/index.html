@@ -4,6 +4,25 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>سودیار — مدیریت سرمایه‌گذاری گروهی</title>
+    <!--
+      Theme bootstrap: runs before the stylesheet/bundle so a dark-theme user
+      never sees a white flash. Mirrors lib/theme.ts (keep the key in sync).
+    -->
+    <script>
+      (function () {
+        try {
+          var t = window.localStorage.getItem("soodyar.theme");
+          if (t === "dark" || t === "midnight") {
+            document.documentElement.dataset.theme = t;
+            document.documentElement.style.colorScheme = "dark";
+            document.documentElement.style.backgroundColor =
+              t === "dark" ? "#0f172a" : "#0b0f14";
+          }
+        } catch (e) {
+          /* localStorage unavailable; light theme stays the default */
+        }
+      })();
+    </script>
     <link
       rel="stylesheet"
       href="https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/Vazirmatn-font-face.css"
