@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
   CalendarRange,
+  ChevronDown,
   Database,
   Download,
   Flame,
@@ -30,7 +31,7 @@ import {
   type AnalyticsValuationStatus,
   type BenchmarkKey,
 } from "../lib/api";
-import { Card, Empty, InfoNote, PageHeader, RiskNotice, StatCard, Badge } from "../components/ui";
+import { Card, Empty, PageHeader, StatCard, Badge } from "../components/ui";
 import { JalaliDateInput } from "../components/JalaliDateInput";
 import { useSettings } from "../context/SettingsContext";
 import { useToast } from "../components/Toast";
@@ -555,36 +556,66 @@ export default function Analytics() {
             />
           </div>
 
-          <InfoNote>
-            <strong>این چهار عدد یک مفهوم را نشان نمی‌دهند:</strong> سود واقعی مبلغ ریالی ایجادشده است؛ بازده NAV
-            عملکرد یک واحد را می‌سنجد؛ XIRR زمان‌بندی پول اعضا را وزن می‌دهد؛ و واریز/برداشت صرفاً جریان سرمایه است.
-            بنابراین جمع واریزها هرگز به‌عنوان سود نمایش داده نمی‌شود.
-          </InfoNote>
-
-          <RiskNotice />
-          {(report.coverage.warnings.length > 0 || report.coverage.navStatus !== "COMPLETE") && (
-            <Card className="border-amber-300 bg-amber-50">
-              <div className="flex items-start gap-3 text-amber-900">
-                <AlertTriangle className="mt-0.5 shrink-0" size={20} />
-                <div>
-                  <div className="font-semibold">پوشش داده‌های این گزارش کامل نیست</div>
-                  <div className="mt-1 text-sm leading-7">
-                    وضعیت NAV: <Badge tone={statusTone(report.coverage.navStatus)}>{statusLabel(report.coverage.navStatus)}</Badge>
-                  </div>
-                  {report.coverage.warnings.length > 0 && (
-                    <ul className="mt-2 list-inside list-disc space-y-1 text-sm leading-7">
-                      {report.coverage.warnings.map((warning, index) => (
-                        <li key={`${warning}-${index}`}>{warning}</li>
-                      ))}
-                    </ul>
-                  )}
-                  <p className="mt-2 text-xs leading-6 text-amber-800">
-                    دارایی با ارزش دفتری، ارزش منصفانهٔ بازار نیست. برای قیمت گمشده هرگز قیمت آینده یا صفر جایگزین نمی‌شود.
-                  </p>
-                </div>
+          <details className="group rounded-xl border border-blue-200 bg-blue-50/40 shadow-card">
+            <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-5 py-4 font-semibold text-blue-900 marker:content-none">
+              <span className="flex flex-wrap items-center gap-2">
+                توضیحات و نکات محاسبات
+                {(report.coverage.warnings.length > 0 || report.coverage.navStatus !== "COMPLETE") && (
+                  <Badge tone="amber">پوشش ناقص</Badge>
+                )}
+              </span>
+              <ChevronDown
+                aria-hidden="true"
+                className="shrink-0 transition-transform duration-200 group-open:rotate-180"
+                size={20}
+              />
+            </summary>
+            <div className="space-y-4 border-t border-blue-200 px-5 py-4 text-sm leading-7 text-blue-900">
+              <p>
+                <strong>این چهار عدد یک مفهوم را نشان نمی‌دهند:</strong> سود واقعی مبلغ ریالی ایجادشده است؛ بازده NAV
+                عملکرد یک واحد را می‌سنجد؛ XIRR زمان‌بندی پول اعضا را وزن می‌دهد؛ و واریز/برداشت صرفاً جریان سرمایه است.
+                بنابراین جمع واریزها هرگز به‌عنوان سود نمایش داده نمی‌شود.
+              </p>
+              <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-amber-800">
+                ارزش‌ها بر اساس قیمت‌های ثبت‌شده هستند و تضمین سود وجود ندارد.
               </div>
-            </Card>
-          )}
+              {(report.coverage.warnings.length > 0 || report.coverage.navStatus !== "COMPLETE") && (
+                <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-amber-900">
+                  <div className="flex items-start gap-3">
+                    <AlertTriangle className="mt-0.5 shrink-0" size={20} />
+                    <div>
+                      <div className="font-semibold">پوشش داده‌های این گزارش کامل نیست</div>
+                      <div className="mt-1">
+                        وضعیت NAV: <Badge tone={statusTone(report.coverage.navStatus)}>{statusLabel(report.coverage.navStatus)}</Badge>
+                      </div>
+                      {report.coverage.warnings.length > 0 && (
+                        <ul className="mt-2 list-inside list-disc space-y-1">
+                          {report.coverage.warnings.map((warning, index) => (
+                            <li key={`${warning}-${index}`}>{warning}</li>
+                          ))}
+                        </ul>
+                      )}
+                      <p className="mt-2 text-xs leading-6 text-amber-800">
+                        دارایی با ارزش دفتری، ارزش منصفانهٔ بازار نیست. برای قیمت گمشده هرگز قیمت آینده یا صفر جایگزین نمی‌شود.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+              <ul className="list-inside list-disc space-y-1">
+                <li>سود واقعی ریالی از تغییر NAV پس از حذف اثر واریز و برداشت به‌دست می‌آید؛ خود واریز سود نیست.</li>
+                <li>دارایی AT_COST به بهای تمام‌شده است و ارزش منصفانهٔ بازار یا سود تحقق‌نیافتهٔ قابل اتکا نشان نمی‌دهد.</li>
+                <li>قیمت گمشدهٔ دلار یا طلا با قیمت روز بعد، قیمت آینده یا صفر پر نمی‌شود.</li>
+                <li>مقایسهٔ نقطه‌به‌نقطه و سناریوی خرید در تاریخ هر واریز دو روش متفاوت‌اند و می‌توانند نتیجه‌های متفاوت بدهند.</li>
+                <li>
+                  بازده واقعی از رابطهٔ (۱ + بازده اسمی) ÷ (۱ + تورم) − ۱ می‌آید و تورم آن از نقاط «شاخص قیمت مصرف‌کننده» است
+                  که خودتان وارد می‌کنید؛ اگر نقطه‌ای برای ابتدا یا انتهای بازه نباشد، عددی ساخته نمی‌شود.
+                </li>
+                <li>قیمت‌های تاریخی دلار و طلا از صفحهٔ عمومی تاریخچهٔ TGJU گرفته می‌شوند (حدود ۳۰ روز اخیر) و ردیف‌های موجود هرگز بازنویسی نمی‌شوند.</li>
+                <li>بازهٔ مؤثر گزارش از {report.meta.effectiveFrom ? toJalali(report.meta.effectiveFrom) : "اولین دادهٔ موجود"} تا {report.meta.effectiveTo ? toJalali(report.meta.effectiveTo) : toJalali(report.meta.to)} است.</li>
+              </ul>
+            </div>
+          </details>
 
           <Card>
             <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
@@ -612,7 +643,6 @@ export default function Analytics() {
                       <CartesianGrid stroke="#e2e8f0" strokeDasharray="3 3" />
                       <XAxis
                         dataKey="label"
-                        reversed
                         tick={{ fontSize: 11, direction: "rtl" }}
                         minTickGap={26}
                       />
@@ -912,7 +942,10 @@ export default function Analytics() {
                         تاریخ‌های جریان بدون قیمت: {missingDatesText(coverage.missingFlowDates)}
                       </div>
                     ) : coverage?.status === "COMPLETE" ? (
-                      <div className="mt-2 text-green-700">قیمت تاریخ تمام جریان‌ها موجود است.</div>
+                      <div className="mt-2 leading-6 text-green-700">
+                        قیمت لازم برای شروع، پایان و همهٔ جریان‌های سرمایه موجود است؛ اگر قیمت همان روز ثبت نشده باشد، آخرین
+                        قیمت پیش از آن استفاده می‌شود.
+                      </div>
                     ) : (
                       <div className="mt-2 text-amber-800">قیمت شروع/پایان یا تاریخ‌های موردنیاز هنوز کامل نیست.</div>
                     )}
@@ -999,22 +1032,6 @@ export default function Analytics() {
                 حداقل یک نقطه در ابتدا و یک نقطه در انتها لازم است.
               </p>
             )}
-          </Card>
-
-          <Card className="border-blue-200 bg-blue-50/40">
-            <h2 className="mb-2 font-semibold text-blue-900">روش محاسبه و محدودیت‌ها</h2>
-            <ul className="list-inside list-disc space-y-1 text-sm leading-7 text-blue-900">
-              <li>سود واقعی ریالی از تغییر NAV پس از حذف اثر واریز و برداشت به‌دست می‌آید؛ خود واریز سود نیست.</li>
-              <li>دارایی AT_COST به بهای تمام‌شده است و ارزش منصفانهٔ بازار یا سود تحقق‌نیافتهٔ قابل اتکا نشان نمی‌دهد.</li>
-              <li>قیمت گمشدهٔ دلار یا طلا با قیمت روز بعد، قیمت آینده یا صفر پر نمی‌شود.</li>
-              <li>مقایسهٔ نقطه‌به‌نقطه و سناریوی خرید در تاریخ هر واریز دو روش متفاوت‌اند و می‌توانند نتیجه‌های متفاوت بدهند.</li>
-              <li>
-                بازده واقعی از رابطهٔ (۱ + بازده اسمی) ÷ (۱ + تورم) − ۱ می‌آید و تورم آن از نقاط «شاخص قیمت مصرف‌کننده» است
-                که خودتان وارد می‌کنید؛ اگر نقطه‌ای برای ابتدا یا انتهای بازه نباشد، عددی ساخته نمی‌شود.
-              </li>
-              <li>قیمت‌های تاریخی دلار و طلا از صفحهٔ عمومی تاریخچهٔ TGJU گرفته می‌شوند (حدود ۳۰ روز اخیر) و ردیف‌های موجود هرگز بازنویسی نمی‌شوند.</li>
-              <li>بازهٔ مؤثر گزارش از {report.meta.effectiveFrom ? toJalali(report.meta.effectiveFrom) : "اولین دادهٔ موجود"} تا {report.meta.effectiveTo ? toJalali(report.meta.effectiveTo) : toJalali(report.meta.to)} است.</li>
-            </ul>
           </Card>
         </>
       )}

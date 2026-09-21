@@ -9,11 +9,14 @@ import {
   Coins,
   Calculator,
   RefreshCw,
+  History,
+  Search,
 } from "lucide-react";
 import {
   api,
   type AssetValuation,
   type MarketQuote,
+  type PortfolioTx,
   type PricePlanRow,
 } from "../lib/api";
 import { Card, PageHeader, Badge, Empty, RiskNotice } from "../components/ui";
@@ -27,9 +30,10 @@ import {
   formatUnits,
   formatPercent,
   todayIso,
+  toJalali,
   toPersianDigits,
 } from "../lib/format";
-import { assetClassLabel, ASSET_CLASSES } from "../lib/labels";
+import { assetClassLabel, ASSET_CLASSES, txStatusLabel, txStatusTone, txTypeLabel } from "../lib/labels";
 
 /**
  * Asset classes that are normally held as a single lot: a car, an apartment, a
@@ -109,8 +113,16 @@ function isSafeFuzzyMatch(left: string, right: string): boolean {
   return true;
 }
 
+/**
+ * سهام، صندوق‌ها و نقره فقط دستی قیمت‌گذاری می‌شوند (درخواست مالک).
+ * برای این دسته‌ها هیچ پیشنهاد قیمت زنده نشان داده نمی‌شود.
+ */
+const MANUAL_PRICE_ONLY_CLASSES = new Set(["STOCK", "ETF", "MUTUAL_FUND", "SILVER"]);
+
 /** Best-effort match of an asset to a live market quote by symbol/name. */
 function matchQuote(asset: AssetValuation, quotes: MarketQuote[]): MarketQuote | null {
+  // سهام، صندوق‌ها و نقره فقط دستی قیمت‌گذاری می‌شوند — هیچ پیشنهاد زنده‌ای نده.
+  if (MANUAL_PRICE_ONLY_CLASSES.has(asset.assetClass)) return null;
   const sym = norm(asset.symbol);
   const nm = norm(asset.name);
   const normalized = quotes.map((quote) => ({
@@ -159,8 +171,7 @@ function PnlCell({
  * Persian labels for the auto-pricing state. The server reports stable codes;
  * the review table must not show them to the user verbatim.
  */
-const PRICE_STATUS_LABELS: Record<string, string> = {
-  PINNED: "کلید دستی",
+const PRICE_STATUS_LABELS: Record<string, string> = {  PINNED: "کلید دستی",
   EXACT: "تطبیق دقیق",
   ALIAS: "نرخ داخلی",
   FUZZY: "تطبیق تقریبی",
@@ -170,6 +181,8 @@ const PRICE_STATUS_LABELS: Record<string, string> = {
   SKIPPED_NO_POSITION: "بدون موجودی",
   NO_PRICE: "بدون قیمت",
   UNMATCHED: "بدون نرخ زنده",
+  MANUAL_ONLY: "قیمت دستی",
+  SKIPPED_MANUAL_ONLY: "قیمت دستی",
 };
 
 function priceStatusLabel(value: string | null | undefined): string {
@@ -195,6 +208,12 @@ export default function Portfolio() {
   const [autoPlanOpen, setAutoPlanOpen] = useState(false);
   const [autoPlan, setAutoPlan] = useState<PricePlanRow[]>([]);
   const [autoBusy, setAutoBusy] = useState(false);
+  const [historyAsset, setHistoryAsset] = useState<AssetValuation | null>(null);
+  const [historyTxs, setHistoryTxs] = useState<PortfolioTx[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState("");
+  const [historyType, setHistoryType] = useState("");
+  const [historySearch, setHistorySearch] = useState("");
 
   const [newAsset, setNewAsset] = useState({ symbol: "", name: "", assetClass: "STOCK" });
   const [tradeMode, setTradeMode] = useState<TradeMode>("UNIT");
@@ -206,6 +225,7 @@ export default function Portfolio() {
     withdrawRial: "",
     feeRial: "",
     effectiveDate: todayIso(),
+    description: "",
   });
   const [valueForm, setValueForm] = useState({ totalRial: "", priceDate: todayIso(), note: "" });
   const [cashForm, setCashForm] = useState({
@@ -266,6 +286,30 @@ export default function Portfolio() {
     [assets, filter]
   );
   const closed = useMemo(() => assets.filter((a) => a.isClosed), [assets]);
+  const visibleHistoryTxs = useMemo(() => {
+    const query = historySearch.trim();
+    return historyTxs.filter(
+      (tx) =>
+        (!historyType || tx.type === historyType) &&
+        (!query || (tx.description ?? "").includes(query))
+    );
+  }, [historySearch, historyTxs, historyType]);
+
+  async function openHistory(asset: AssetValuation) {
+    setHistoryAsset(asset);
+    setHistoryTxs([]);
+    setHistoryType("");
+    setHistorySearch("");
+    setHistoryError("");
+    setHistoryLoading(true);
+    try {
+      setHistoryTxs(await api.portfolioTxs({ assetId: asset.assetId }));
+    } catch (error) {
+      setHistoryError((error as Error).message);
+    } finally {
+      setHistoryLoading(false);
+    }
+  }
 
   async function createAsset() {
     if (!newAsset.symbol || !newAsset.name) {
@@ -355,6 +399,7 @@ export default function Portfolio() {
       pricePerUnitRial,
       feeRial: Number.isFinite(fee) ? fee : 0,
       effectiveDate: trade.effectiveDate,
+      description: trade.description.trim() || undefined,
     };
     try {
       if (tradeOpen.mode === "BUY") await api.buy(body);
@@ -378,6 +423,7 @@ export default function Portfolio() {
       withdrawRial: "",
       feeRial: "",
       effectiveDate: todayIso(),
+      description: "",
     });
   }
 
@@ -420,6 +466,25 @@ export default function Portfolio() {
         )} مورد دست‌نخورده ماند`,
         summary.updated > 0 ? "success" : "error"
       );
+      setAutoPlan(await api.priceAutoPlan());
+      await load();
+    } catch (error) {
+      toast((error as Error).message, "error");
+    } finally {
+      setAutoBusy(false);
+    }
+  }
+
+  /**
+   * Flips one holding between automatic and manual pricing. Manual means the
+   * scheduler never touches it again — used where the market has no reachable
+   * feed, or where the owner wants their own figure to stand.
+   */
+  async function toggleAutoPrice(assetId: string, enabled: boolean) {
+    setAutoBusy(true);
+    try {
+      await api.setAssetAutoPrice(assetId, enabled);
+      toast(enabled ? "قیمت‌گذاری خودکار روشن شد" : "قیمت‌گذاری دستی شد", "success");
       setAutoPlan(await api.priceAutoPlan());
       await load();
     } catch (error) {
@@ -682,7 +747,7 @@ export default function Portfolio() {
                   <th className="th">سود/زیان محقق‌شده</th>
                   <th className="th">سود/زیان کل</th>
                   <th className="th">درصد سبد</th>
-                  <th className="th"></th>
+                  <th className="th">عملیات</th>
                 </tr>
               </thead>
               <tbody>
@@ -691,6 +756,11 @@ export default function Portfolio() {
                     <td className="td">
                       <div className="font-medium">{a.symbol}</div>
                       <div className="text-xs text-slate-400">{a.name}</div>
+                      {!a.autoPriceEnabled && (
+                        <div className="mt-1">
+                          <Badge tone="slate">قیمت دستی</Badge>
+                        </div>
+                      )}
                     </td>
                     <td className="td">
                       <Badge tone="blue">{assetClassLabel(a.assetClass)}</Badge>
@@ -728,6 +798,14 @@ export default function Portfolio() {
                     <td className="td tabular">{formatPercent(a.weightPercent)}</td>
                     <td className="td">
                       <div className="flex gap-1">
+                        <button
+                          className="rounded-md bg-slate-100 p-1.5 text-slate-600 hover:bg-slate-200"
+                          title="تاریخچه دارایی"
+                          aria-label={`تاریخچه ${a.symbol}`}
+                          onClick={() => openHistory(a)}
+                        >
+                          <History size={16} />
+                        </button>
                         {(() => {
                           const q = matchQuote(a, quotes);
                           if (!q || !q.priceRial) return null;
@@ -810,7 +888,7 @@ export default function Portfolio() {
                   <th className="th">نماد</th>
                   <th className="th">دسته</th>
                   <th className="th">سود/زیان محقق‌شده</th>
-                  <th className="th"></th>
+                  <th className="th">عملیات</th>
                 </tr>
               </thead>
               <tbody>
@@ -830,6 +908,14 @@ export default function Portfolio() {
                       </td>
                       <td className="td">
                         <div className="flex gap-1">
+                          <button
+                            className="rounded-md bg-slate-100 p-1.5 text-slate-600 hover:bg-slate-200"
+                            title="تاریخچه دارایی"
+                            aria-label={`تاریخچه ${a.symbol}`}
+                            onClick={() => openHistory(a)}
+                          >
+                            <History size={16} />
+                          </button>
                           <button
                             className="rounded-md bg-green-50 p-1.5 text-green-600 hover:bg-green-100"
                             title="خرید مجدد"
@@ -854,6 +940,113 @@ export default function Portfolio() {
           </div>
         </Card>
       )}
+
+      {/* Asset ledger history */}
+      <Modal
+        open={!!historyAsset}
+        onClose={() => setHistoryAsset(null)}
+        title={`تاریخچه ${historyAsset?.symbol ?? "دارایی"}`}
+        size="xl"
+        footer={
+          <button className="btn-secondary" onClick={() => setHistoryAsset(null)}>
+            بستن
+          </button>
+        }
+      >
+        {historyAsset && (
+          <div className="space-y-4">
+            <div>
+              <div className="font-medium text-slate-800">{historyAsset.name}</div>
+              <div className="mt-1 text-xs text-slate-500">همهٔ خریدها، فروش‌ها و عملیات نقدی مرتبط با این دارایی</div>
+            </div>
+            <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+              <div className="rounded-lg bg-slate-50 p-3">
+                <div className="text-xs text-slate-500">موجودی فعلی</div>
+                <div className="mt-1 tabular font-medium">{formatUnits(historyAsset.quantity, 8)}</div>
+              </div>
+              <div className="rounded-lg bg-slate-50 p-3">
+                <div className="text-xs text-slate-500">میانگین خرید</div>
+                <div className="mt-1 tabular font-medium">{formatMoney(historyAsset.avgCostRial, currency)}</div>
+              </div>
+              <div className="rounded-lg bg-slate-50 p-3">
+                <div className="text-xs text-slate-500">ارزش روز</div>
+                <div className="mt-1 tabular font-medium">{formatMoney(historyAsset.marketValueRial, currency)}</div>
+              </div>
+              <div className="rounded-lg bg-slate-50 p-3">
+                <div className="text-xs text-slate-500">سود/زیان محقق‌شده</div>
+                <div className={`mt-1 tabular font-medium ${Number(historyAsset.realizedPnlRial) >= 0 ? "text-green-600" : "text-red-600"}`}>
+                  {formatMoney(historyAsset.realizedPnlRial, currency)}
+                </div>
+              </div>
+            </div>
+            <div className="flex flex-col gap-3 sm:flex-row">
+              <select className="input sm:max-w-48" value={historyType} onChange={(event) => setHistoryType(event.target.value)}>
+                <option value="">همهٔ عملیات</option>
+                <option value="BUY">خرید</option>
+                <option value="SELL">فروش</option>
+                <option value="DIVIDEND">سود نقدی</option>
+                <option value="FEE">هزینه</option>
+                <option value="CASH_ADJUSTMENT">تعدیل نقدی</option>
+              </select>
+              <label className="relative flex-1">
+                <Search className="absolute right-3 top-2.5 text-slate-400" size={17} aria-hidden="true" />
+                <input
+                  className="input pr-10"
+                  value={historySearch}
+                  onChange={(event) => setHistorySearch(event.target.value)}
+                  placeholder="جست‌وجو در توضیحات"
+                  aria-label="جست‌وجو در توضیحات تاریخچه"
+                />
+              </label>
+            </div>
+            {historyLoading ? (
+              <div className="py-8 text-center text-sm text-slate-500">در حال دریافت تاریخچه…</div>
+            ) : historyError ? (
+              <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{historyError}</div>
+            ) : visibleHistoryTxs.length === 0 ? (
+              <Empty>{historyTxs.length === 0 ? "هنوز سابقه‌ای برای این دارایی ثبت نشده است." : "رکوردی با این فیلتر پیدا نشد."}</Empty>
+            ) : (
+              <div className="overflow-x-auto rounded-lg border border-slate-200">
+                <table className="w-full min-w-[1100px]">
+                  <thead className="bg-slate-50">
+                    <tr>
+                      <th className="th">تاریخ</th>
+                      <th className="th">نوع</th>
+                      <th className="th">مقدار</th>
+                      <th className="th">قیمت هر واحد</th>
+                      <th className="th">کارمزد</th>
+                      <th className="th">اثر نقدی</th>
+                      <th className="th">سود/زیان فروش</th>
+                      <th className="th">وضعیت</th>
+                      <th className="th">توضیح</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {visibleHistoryTxs.map((tx) => {
+                      const isTrade = tx.type === "BUY" || tx.type === "SELL";
+                      const cashTone = Number(tx.cashDeltaRial) > 0 ? "text-green-600" : Number(tx.cashDeltaRial) < 0 ? "text-red-600" : "";
+                      const pnlTone = Number(tx.realizedPnlRial) > 0 ? "text-green-600" : Number(tx.realizedPnlRial) < 0 ? "text-red-600" : "";
+                      return (
+                        <tr key={tx.id} className="border-t border-slate-100">
+                          <td className="td whitespace-nowrap tabular">{toJalali(tx.effectiveDate)}</td>
+                          <td className="td"><Badge tone={tx.type === "BUY" ? "green" : tx.type === "SELL" ? "red" : "blue"}>{txTypeLabel(tx.type)}</Badge></td>
+                          <td className="td tabular">{isTrade ? formatUnits(tx.quantity, 8) : "—"}</td>
+                          <td className="td whitespace-nowrap tabular">{isTrade ? formatMoney(tx.pricePerUnit, currency) : "—"}</td>
+                          <td className="td whitespace-nowrap tabular">{isTrade ? formatMoney(tx.feeRial, currency) : "—"}</td>
+                          <td className={`td whitespace-nowrap tabular ${cashTone}`}>{formatMoney(tx.cashDeltaRial, currency)}</td>
+                          <td className={`td whitespace-nowrap tabular ${pnlTone}`}>{tx.type === "SELL" ? formatMoney(tx.realizedPnlRial, currency) : "—"}</td>
+                          <td className="td"><Badge tone={txStatusTone(tx.status)}>{txStatusLabel(tx.status)}</Badge></td>
+                          <td className="td max-w-64 truncate" title={tx.description ?? undefined}>{tx.description || "—"}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+      </Modal>
 
       {/* New asset modal */}
       <Modal
@@ -1050,6 +1243,15 @@ export default function Portfolio() {
               onChange={(iso) => setTrade({ ...trade, effectiveDate: iso })}
             />
           </div>
+          <div className="sm:col-span-2">
+            <label className="label">توضیح (اختیاری)</label>
+            <input
+              className="input"
+              value={trade.description}
+              onChange={(e) => setTrade({ ...trade, description: e.target.value })}
+              placeholder="مثلاً خرید تتر از صرافی برای سرمایه‌گذاری"
+            />
+          </div>
         </div>
         {tradeMode === "TOTAL" && (
           <p className="mt-3 rounded-lg border-r-4 border-brand-300 bg-brand-50/60 px-3 py-2 text-xs leading-6 text-brand-800">
@@ -1164,7 +1366,8 @@ export default function Portfolio() {
       >
         <p className="mb-3 text-xs leading-6 text-slate-500">
           هر دارایی به یک نرخ زنده وصل می‌شود و قیمت امروز ثبت می‌گردد. اگر امروز خودتان قیمتی ثبت کرده باشید،
-          دست‌نخورده می‌ماند. منبع فعلی: TGJU برای ارز، طلا، نقره و صندوق‌های کالایی.
+          دست‌نخورده می‌ماند. سهام، صندوق‌ها و نقره فقط دستی قیمت‌گذاری می‌شوند و در این لیست خودکار ثبت نمی‌شوند.
+          منبع فعلی: TGJU برای ارز، طلا و صندوق‌های کالایی.
         </p>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[560px]">
@@ -1174,38 +1377,69 @@ export default function Portfolio() {
                 <th className="th">نرخ زنده</th>
                 <th className="th">قیمت (ریال)</th>
                 <th className="th">وضعیت</th>
+                <th className="th">به‌روزرسانی خودکار</th>
               </tr>
             </thead>
             <tbody>
-              {autoPlan.map((row) => (
-                <tr key={row.assetId} className="border-b border-slate-50">
-                  <td className="td">
-                    <div className="font-medium">{row.symbol}</div>
-                    <div className="text-xs text-slate-400">{row.name}</div>
-                  </td>
-                  <td className="td text-xs">{row.matchedName ?? "—"}</td>
-                  <td className="td tabular">{row.priceRial ? formatMoney(row.priceRial, currency) : "—"}</td>
-                  <td className="td">
-                    {row.confidence === "UNMATCHED" || row.confidence === "NO_PRICE" ? (
-                      <div>
-                        <Badge tone="amber">{priceStatusLabel(row.confidence)}</Badge>
-                        <div className="mt-1 text-[11px] leading-5 text-slate-500">{row.reason}</div>
-                      </div>
-                    ) : (
-                      <div>
-                        <Badge tone="green">{priceStatusLabel(row.status ?? row.confidence)}</Badge>
-                        <div className="mt-1 text-[11px] text-slate-400">{row.reason}</div>
-                      </div>
-                    )}
-                  </td>
-                </tr>
-              ))}
+              {autoPlan.map((row) => {
+                const asset = assets.find((a) => a.assetId === row.assetId);
+                const isManual = row.confidence === "MANUAL_ONLY";
+                const isForcedManual = asset != null && MANUAL_PRICE_ONLY_CLASSES.has(asset.assetClass);
+                const hasLiveQuote =
+                  row.confidence !== "UNMATCHED" &&
+                  row.confidence !== "NO_PRICE" &&
+                  !isManual;
+                return (
+                  <tr key={row.assetId} className="border-b border-slate-50">
+                    <td className="td">
+                      <div className="font-medium">{row.symbol}</div>
+                      <div className="text-xs text-slate-400">{row.name}</div>
+                    </td>
+                    <td className="td text-xs">{row.matchedName ?? "—"}</td>
+                    <td className="td tabular">{row.priceRial ? formatMoney(row.priceRial, currency) : "—"}</td>
+                    <td className="td">
+                      {isManual || !hasLiveQuote ? (
+                        <div>
+                          <Badge tone="amber">{priceStatusLabel(row.confidence)}</Badge>
+                          <div className="mt-1 text-[11px] leading-5 text-slate-500">{row.reason}</div>
+                        </div>
+                      ) : (
+                        <div>
+                          <Badge tone="green">{priceStatusLabel(row.status ?? row.confidence)}</Badge>
+                          <div className="mt-1 text-[11px] text-slate-400">{row.reason}</div>
+                        </div>
+                      )}
+                    </td>
+                    <td className="td">
+                      {isForcedManual ? (
+                        <span className="text-xs text-slate-500" title="سهام، صندوق‌ها و نقره فقط دستی قیمت‌گذاری می‌شوند">
+                          همیشه دستی
+                        </span>
+                      ) : (
+                      <button
+                        className="btn-secondary px-2 py-1 text-xs"
+                        disabled={autoBusy || asset?.isClosed}
+                        onClick={() => toggleAutoPrice(row.assetId, isManual)}
+                        title={
+                          isManual
+                            ? "روشن‌کردن به‌روزرسانی خودکار برای این دارایی"
+                            : "خاموش‌کردن به‌روزرسانی خودکار (قیمت را خودم وارد می‌کنم)"
+                        }
+                      >
+                        {isManual ? "دستی — روشن کن" : "خودکار — دستی کن"}
+                      </button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
         <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-6 text-amber-900">
-          سهام و صندوق‌های بورسی تهران از این دستگاه در دسترس نیستند و برای آن‌ها قیمت را دستی وارد کنید؛ دلیلش در
-          ستون وضعیت هر ردیف نوشته شده است.
+          سهام، صندوق‌ها و نقره همیشه دستی قیمت‌گذاری می‌شوند؛ قیمت آن‌ها را از صفحه «محاسبه NAV» یا دکمهٔ
+          ماشین‌حساب هر ردیف وارد کنید. با دکمهٔ ستون آخر می‌توانید سایر دارایی‌ها را از چرخهٔ به‌روزرسانی خودکار
+          بیرون ببرید.
         </p>
       </Modal>
 

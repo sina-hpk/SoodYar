@@ -58,6 +58,10 @@ model Asset {
   // Last time the auto-refresh scheduler wrote a PriceSnapshot for this asset.
   // Null means auto-refresh has never touched it (manual prices stay manual).
   lastAutoPriceAt DateTime?
+  // Opt-out of automatic pricing. Off means the holder enters this asset's
+  // price by hand and the refresh never touches it — used for holdings whose
+  // market has no reachable feed, or where the owner prefers their own figure.
+  autoPriceEnabled Boolean @default(true)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 

@@ -52,7 +52,7 @@ export async function transactionRoutes(app: FastifyInstance) {
     const txs = await prisma.portfolioTransaction.findMany({
       where: { type: q.type || undefined, assetId: q.assetId || undefined },
       include: { asset: true },
-      orderBy: { effectiveDate: "desc" },
+      orderBy: [{ effectiveDate: "desc" }, { createdAt: "desc" }],
     });
     return serialize(txs);
   });

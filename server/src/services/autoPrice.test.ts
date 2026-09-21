@@ -179,7 +179,7 @@ describe("planAssetPrices confidence values", () => {
       asset({ id: "alias", symbol: "تتر", name: "دارایی" }),
       asset({ id: "fuzzy", symbol: "نامشخص", name: "گنجینه زمین" }),
       asset({ id: "noprice", symbol: "NOPRICE", name: "x" }),
-      asset({ id: "none", symbol: "نمونه سهام", name: "شرکت نمونه بورسی", assetClass: "ETF" }),
+      asset({ id: "none", symbol: "نمونه سهام", name: "شرکت نمونه بورسی", assetClass: "OTHER" }),
     ],
     synthetic
   );
@@ -204,6 +204,49 @@ describe("planAssetPrices confidence values", () => {
     expect(pinned.provider).toBe("TGJU");
     expect(pinned.source).toBe("TGJU");
     expect(pinned.priceRial).toBe("1000");
+  });
+});
+
+describe("manual-only holdings", () => {
+  const synthetic = [quote({ key: "usdt_irr", symbol: "TETHERIRR", name: "Domestic Tether" })];
+
+  it("never matches a quote for a holding the owner prices by hand", () => {
+    const rows = planAssetPrices(
+      [
+        asset({ id: "manual", symbol: "USDT", name: "تتر", autoPriceEnabled: false }),
+        asset({ id: "auto", symbol: "USDT", name: "تتر" }),
+      ],
+      synthetic
+    );
+    const manualRow = rows.find((r) => r.assetId === "manual")!;
+    expect(manualRow.confidence).toBe("MANUAL_ONLY");
+    expect(manualRow.matchedKey).toBeNull();
+    expect(manualRow.priceRial).toBeNull();
+    expect(rows.find((r) => r.assetId === "auto")!.confidence).not.toBe("MANUAL_ONLY");
+  });
+
+  it("treats an absent flag as automatic so existing callers keep working", () => {
+    const legacy = asset({ id: "legacy", symbol: "USDT", name: "تتر" }) as Record<string, unknown>;
+    delete legacy.autoPriceEnabled;
+    const row = planAssetPrices([legacy as never], synthetic).find((r) => r.assetId === "legacy")!;
+    expect(row.confidence).not.toBe("MANUAL_ONLY");
+  });
+
+  it("forces STOCK/ETF/MUTUAL_FUND/SILVER to manual-only even when auto is enabled", () => {
+    const rows = planAssetPrices(
+      [
+        asset({ id: "s1", symbol: "فملی", name: "ملی مس", assetClass: "STOCK" }),
+        asset({ id: "e1", symbol: "اهرم", name: "صندوق اهرم", assetClass: "ETF" }),
+        asset({ id: "m1", symbol: "آگاس", name: "صندوق آگاس", assetClass: "MUTUAL_FUND" }),
+        asset({ id: "s2", symbol: "نقره", name: "نقره", assetClass: "SILVER" }),
+      ],
+      synthetic
+    );
+    for (const r of rows) {
+      expect(r.confidence).toBe("MANUAL_ONLY");
+      expect(r.matchedKey).toBeNull();
+      expect(r.priceRial).toBeNull();
+    }
   });
 });
 

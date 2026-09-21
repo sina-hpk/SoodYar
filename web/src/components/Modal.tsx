@@ -6,12 +6,14 @@ export function Modal({
   title,
   children,
   footer,
+  size = "md",
 }: {
   open: boolean;
   onClose: () => void;
   title: string;
   children: ReactNode;
   footer?: ReactNode;
+  size?: "md" | "xl";
 }) {
   if (!open) return null;
   return (
@@ -21,7 +23,7 @@ export function Modal({
         onClick={onClose}
         aria-hidden
       />
-      <div className="relative z-10 w-full max-w-lg rounded-xl bg-white shadow-xl">
+      <div className={`relative z-10 w-full rounded-xl bg-white shadow-xl ${size === "xl" ? "max-w-6xl" : "max-w-lg"}`}>
         <div className="flex items-center justify-between border-b border-slate-100 px-5 py-3">
           <h3 className="font-semibold text-slate-800">{title}</h3>
           <button

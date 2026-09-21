@@ -154,3 +154,9 @@ export const settingSchema = z.object({
 export const marketKeySchema = z.object({
   marketKey: z.string().nullable(),
 });
+
+// Turn automatic pricing on/off for one asset. Off means the owner enters its
+// price by hand and the scheduled refresh must not touch it.
+export const autoPriceSchema = z.object({
+  enabled: z.boolean(),
+});

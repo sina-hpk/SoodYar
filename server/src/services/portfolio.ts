@@ -42,6 +42,8 @@ export interface AssetValuation {
   totalReturnPercent: string | null;
   weightPercent: string; // share of total NAV
   isClosed: boolean;
+  /** False means the owner prices this holding by hand (auto refresh skips it). */
+  autoPriceEnabled: boolean;
 }
 
 export interface CategoryAllocation {
@@ -172,6 +174,7 @@ export async function getPortfolioState(): Promise<PortfolioState> {
       totalReturnPercent: totalRet ? totalRet.toString() : null,
       weightPercent: "0",
       isClosed: qty.lte(0),
+      autoPriceEnabled: a.autoPriceEnabled,
     });
   }
 

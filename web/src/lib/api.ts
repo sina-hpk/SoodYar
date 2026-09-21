@@ -73,7 +73,9 @@ export type PriceMatchConfidence =
   | "ALIAS"
   | "FUZZY"
   | "UNMATCHED"
-  | "NO_PRICE";
+  | "NO_PRICE"
+  /** The owner prices this holding by hand; automatic pricing is switched off. */
+  | "MANUAL_ONLY";
 
 /** One asset's auto-pricing plan row: which live quote feeds it, if any. */
 export interface PricePlanRow {
@@ -118,6 +120,8 @@ export interface AssetValuation {
   totalReturnPercent: string | null;
   weightPercent: string;
   isClosed: boolean;
+  /** False means the owner enters this price by hand (auto refresh skips it). */
+  autoPriceEnabled: boolean;
 }
 
 export interface CategoryAllocation {
@@ -158,10 +162,13 @@ export interface PortfolioTx {
   assetId: string | null;
   quantity: string;
   pricePerUnit: string;
+  feeRial: string;
+  realizedPnlRial: string;
   cashDeltaRial: string;
   effectiveDate: string;
+  createdAt: string;
   description?: string | null;
-  asset?: { symbol: string } | null;
+  asset?: { id: string; symbol: string; name: string } | null;
 }
 
 export interface MarketQuote {
@@ -550,6 +557,11 @@ export const api = {
     request(`/assets/${assetId}/market-key`, {
       method: "PUT",
       body: JSON.stringify({ marketKey }),
+    }),
+  setAssetAutoPrice: (assetId: string, enabled: boolean) =>
+    request(`/assets/${assetId}/auto-price`, {
+      method: "PUT",
+      body: JSON.stringify({ enabled }),
     }),
 
   // Analytics & benchmark data

@@ -105,7 +105,7 @@ function safeFuzzy(a: string, b: string): boolean {
 // ---------------------------------------------------------------------------
 
 export type MatchConfidence = "PINNED" | "EXACT" | "ALIAS" | "FUZZY" | "UNMATCHED";
-export type PlanConfidence = MatchConfidence | "NO_PRICE";
+export type PlanConfidence = MatchConfidence | "NO_PRICE" | "MANUAL_ONLY";
 export type QuoteProvider = "TGJU" | "TSETMC";
 
 export interface AssetPricePlanRow {
@@ -130,6 +130,8 @@ export interface AutoPriceAssetInput {
   assetClass: string;
   quantity: string;
   marketKey: string | null;
+  /** False means the holder prices this asset by hand; the refresh must skip it. */
+  autoPriceEnabled: boolean;
 }
 
 export interface QuoteMatch {
@@ -222,7 +224,7 @@ export function resolveQuoteForAsset(
 
 function toPlanRow(
   asset: AutoPriceAssetInput,
-  match: QuoteMatch,
+  match: { quote: MarketQuote | null; confidence: PlanConfidence; reason: string },
   provider: QuoteProvider | null
 ): AssetPricePlanRow {
   const quote = match.quote;
@@ -251,7 +253,24 @@ export function planAssetPrices(
   assets: AutoPriceAssetInput[],
   quotes: MarketQuote[]
 ): AssetPricePlanRow[] {
-  return assets.map((asset) => toPlanRow(asset, resolveQuoteForAsset(asset, quotes), "TGJU"));
+  return assets.map((asset) => {
+    // سهام، صندوق‌ها و نقره همیشه دستی هستند — حتی اگر autoPriceEnabled روشن باشد
+    // یا marketKey پین شده باشد. قیمت را مالک دستی وارد می‌کند.
+    if (MANUAL_PRICE_ONLY_CLASSES.has(asset.assetClass)) {
+      return toPlanRow(
+        asset,
+        { quote: null, confidence: "MANUAL_ONLY", reason: MANUAL_PRICE_ONLY_REASON },
+        null
+      );
+    }
+    return asset.autoPriceEnabled !== false
+      ? toPlanRow(asset, resolveQuoteForAsset(asset, quotes), "TGJU")
+      : toPlanRow(
+          asset,
+          { quote: null, confidence: "MANUAL_ONLY", reason: "قیمت‌گذاری دستی؛ به‌روزرسانی خودکار برای این دارایی خاموش است" },
+          null
+        );
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -271,6 +290,22 @@ export const TSETMC_UNAVAILABLE_FA =
 
 /** Asset classes whose live price would come from TSETMC, not TGJU. */
 const TSETMC_CLASSES = new Set(["STOCK", "ETF", "MUTUAL_FUND"]);
+
+/**
+ * Asset classes that are ALWAYS priced by hand (owner request).
+ * سهام، صندوق‌ها (ETF / صندوق سرمایه‌گذاری) و نقره هیچ‌وقت به‌صورت خودکار
+ * قیمت‌گذاری نمی‌شوند — نه در «ثبت NavSnapshot» و نه در «به‌روزرسانی قیمت».
+ * قیمت این‌ها فقط از طریق ثبت دستی (صفحه NAV / دکمه ماشین‌حساب پرتفوی) وارد می‌شود.
+ */
+export const MANUAL_PRICE_ONLY_CLASSES = new Set([
+  "STOCK",
+  "ETF",
+  "MUTUAL_FUND",
+  "SILVER",
+]);
+
+export const MANUAL_PRICE_ONLY_REASON =
+  "قیمت‌گذاری دستی؛ سهام، صندوق‌ها و نقره فقط با قیمت دستی ارزش‌گذاری می‌شوند";
 
 export interface TsetmcInstrument {
   insCode: string;
@@ -482,6 +517,7 @@ export type RefreshStatus =
   | "UPDATED"
   | "DRY_RUN"
   | "SKIPPED_MANUAL"
+  | "SKIPPED_MANUAL_ONLY"
   | "SKIPPED_NO_POSITION"
   | PlanConfidence;
 
@@ -518,6 +554,11 @@ export async function refreshAssetPrices(
     const asset = byId.get(row.assetId);
     if (!asset) continue;
 
+    if (row.confidence === "MANUAL_ONLY") {
+      skipped++;
+      results.push({ ...row, status: "SKIPPED_MANUAL_ONLY" });
+      continue;
+    }
     if (row.confidence === "UNMATCHED" || row.confidence === "NO_PRICE") {
       unmatched++;
       results.push({ ...row, status: row.confidence });

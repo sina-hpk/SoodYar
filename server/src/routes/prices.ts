@@ -1,9 +1,9 @@
 import type { FastifyInstance } from "fastify";
 import { prisma } from "../db.js";
 import { serialize } from "../lib/serialize.js";
-import { marketKeySchema } from "../schemas.js";
+import { marketKeySchema, autoPriceSchema } from "../schemas.js";
 import { audit } from "../services/audit.js";
-import { planAssetPriceRefresh, refreshAssetPrices } from "../services/autoPrice.js";
+import { planAssetPriceRefresh, refreshAssetPrices, MANUAL_PRICE_ONLY_CLASSES, MANUAL_PRICE_ONLY_REASON } from "../services/autoPrice.js";
 
 /**
  * Automatic market-price refresh endpoints plus the per-asset quote pin.
@@ -50,6 +50,37 @@ export async function priceRoutes(app: FastifyInstance) {
     await audit("ASSET_MARKET_KEY_SET", "Asset", id, {
       marketKey,
       previousMarketKey: asset.marketKey,
+    });
+    return serialize(updated);
+  });
+
+  /**
+   * Switches automatic pricing on or off for one asset. Off is the owner saying
+   * "I enter this price myself": the scheduler then skips the holding entirely,
+   * which is what an unreachable market (Tehran-listed funds) or a hand-set
+   * figure needs.
+   */
+  app.put("/assets/:id/auto-price", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const parsed = autoPriceSchema.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+
+    const asset = await prisma.asset.findUnique({ where: { id } });
+    if (!asset) return reply.code(404).send({ error: "دارایی یافت نشد" });
+
+    // سهام، صندوق‌ها و نقره فقط دستی قیمت‌گذاری می‌شوند؛ روشن‌کردن خودکار مجاز نیست.
+    if (parsed.data.enabled && MANUAL_PRICE_ONLY_CLASSES.has(asset.assetClass)) {
+      return reply.code(400).send({ error: MANUAL_PRICE_ONLY_REASON });
+    }
+
+    const updated = await prisma.asset.update({
+      where: { id },
+      data: { autoPriceEnabled: parsed.data.enabled },
+    });
+    await audit("ASSET_AUTO_PRICE_SET", "Asset", id, {
+      symbol: asset.symbol,
+      enabled: parsed.data.enabled,
+      previous: asset.autoPriceEnabled,
     });
     return serialize(updated);
   });

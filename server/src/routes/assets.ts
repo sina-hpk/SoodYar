@@ -5,6 +5,7 @@ import { assetCreateSchema, assetUpdateSchema, priceSchema } from "../schemas.js
 import { audit } from "../services/audit.js";
 import { getPortfolioState } from "../services/portfolio.js";
 import { recordPrice } from "../services/assetTx.js";
+import { MANUAL_PRICE_ONLY_CLASSES } from "../services/autoPrice.js";
 import { toDecimal } from "../lib/money.js";
 
 export async function assetRoutes(app: FastifyInstance) {
@@ -24,7 +25,11 @@ export async function assetRoutes(app: FastifyInstance) {
     if (!parsed.success)
       return reply.code(400).send({ error: parsed.error.flatten() });
     try {
-      const asset = await prisma.asset.create({ data: parsed.data });
+      // سهام، صندوق‌ها و نقره همیشه دستی قیمت‌گذاری می‌شوند.
+      const manualOnly = MANUAL_PRICE_ONLY_CLASSES.has(parsed.data.assetClass ?? "OTHER");
+      const asset = await prisma.asset.create({
+        data: { ...parsed.data, autoPriceEnabled: manualOnly ? false : true },
+      });
       await audit("ASSET_CREATE", "Asset", asset.id, parsed.data);
       return serialize(asset);
     } catch {
