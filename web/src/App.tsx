@@ -8,6 +8,7 @@ import MemberDetail from "./pages/MemberDetail";
 import Portfolio from "./pages/Portfolio";
 import NavCalc from "./pages/NavCalc";
 import Transactions from "./pages/Transactions";
+import Ledger from "./pages/Ledger";
 import Reports from "./pages/Reports";
 import Analytics from "./pages/Analytics";
 import Audit from "./pages/Audit";
@@ -26,6 +27,7 @@ export default function App() {
             <Route path="/portfolio" element={<Portfolio />} />
             <Route path="/nav" element={<NavCalc />} />
             <Route path="/transactions" element={<Transactions />} />
+            <Route path="/ledger" element={<Ledger />} />
             <Route path="/reports" element={<Reports />} />
             <Route path="/analytics" element={<Analytics />} />
             <Route path="/audit" element={<Audit />} />

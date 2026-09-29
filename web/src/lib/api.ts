@@ -151,6 +151,7 @@ export interface MemberTx {
   units: string;
   navPerUnit: string | null;
   effectiveDate: string;
+  createdAt?: string;
   description?: string | null;
   member?: { fullName: string };
 }
